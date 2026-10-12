@@ -1,0 +1,61 @@
+# ============================================================
+#  Gastos Generales · despliegue en Render
+#
+#  1. Subí este proyecto a un repositorio de GitHub.
+#  2. En Render: New → Web Service → elegir ese repositorio.
+#     (Render va a leer este archivo y crear el servicio solo.)
+#  3. Completá las variables marcadas con "sync: false" en el
+#     panel de Environment del servicio:
+#        APP_PASSWORD · BOT_CLAVE · TELEGRAM_BOT_TOKEN
+#  4. Deploy. Cuando termine, entrá a la URL pública con tu
+#     contraseña y seguí el README para vincular tu número.
+# ============================================================
+services:
+  - type: web
+    name: gastos-generales
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/salud
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      # Se completan a mano en el panel de Environment de Render
+      - key: APP_PASSWORD
+        sync: false
+      - key: BOT_CLAVE
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      # URL de este mismo servicio: es la que Telegram va a llamar
+      - key: PUBLIC_URL
+        fromService:
+          type: web
+          name: gastos-generales
+          property: hostUrl
+
+# ------------------------------------------------------------
+#  ¿Y si quiero que los datos no se pierdan?
+#
+#  El plan gratis de Render borra el disco en cada reinicio o
+#  redeploy. Hay dos salidas:
+#
+#  a) GRATIS: usá el botón "⬇︎ Descargar respaldo" del dashboard
+#     de vez en cuando. El archivo .json se restaura con
+#     "⬆︎ Restaurar".
+#
+#  b) CON DISCO PERSISTENTE: cambiá `plan: free` por `plan: starter`
+#     y agregá abajo este bloque, más la variable DATA_FILE:
+#
+#     disk:
+#       name: gastos-datos
+#       mountPath: /var/data
+#       sizeGB: 1
+#
+#     envVars:
+#       - key: DATA_FILE
+#         value: /var/data/estado.json
+#       - key: TESSERACT_CACHE
+#         value: /var/data/ocr
+# ------------------------------------------------------------

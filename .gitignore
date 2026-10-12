@@ -1,0 +1,16 @@
+# Dependencias
+node_modules/
+
+# Datos de la app (si el servidor corre en local)
+data/
+
+# Secretos
+.env
+
+# Modelos de OCR (se descargan solos la primera vez)
+*.traineddata
+*.traineddata.gz
+
+# Sistema
+.DS_Store
+*.log

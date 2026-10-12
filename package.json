@@ -1,0 +1,25 @@
+{
+  "name": "gastos-generales",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gastos del hogar: dashboard con categorías, límites y alertas + recepción y clasificación automática de comprobantes desde el celular (Telegram).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/run.js && node test/dashboard-remoto.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pdf-parse": "^1.1.1",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}
