@@ -6,7 +6,9 @@ esto funcionando:
 
 ```
 1. Mandás una foto del ticket de Coto
-2. El bot contesta:  ✅ $38.560 · Supermercado · 🏪 Coto · 💳 Débito
+2. El bot contesta:
+   ✅ $38.560 · Supermercado
+   📅 2026-10-12 · 🏪 Coto · 💳 Débito
 3. Si superaste un límite:  ⛔ Límite superado: Supermercado lleva $315.000 sobre un límite de $300.000.
 4. Entrás al dashboard y el gasto ya está ahí
 ```
@@ -241,9 +243,10 @@ Mandale al bot, en este orden:
 
 | # | Mandale | Esperá que conteste |
 |---|---|---|
-| 1 | `Coto $38.560 con débito` | `✅ $38.560 · Supermercado · 🏪 Coto · 💳 Débito` |
-| 2 | una **foto** de un ticket | `📷 Leyendo el comprobante…` y después lo mismo que arriba |
-| 3 | un **PDF** de resumen bancario | `📄 Leyendo el PDF…` y después el gasto clasificado |
+| 1 | `Coto $38.560 con débito` | `✅ $38.560 · Supermercado` y en la línea siguiente `📅 2026-10-12 · 🏪 Coto · 💳 Débito` |
+| 2 | `Pagué con QR en Coto $4.500` | `✅ $4.500 · Supermercado` y abajo `📅 2026-10-12 · 🏪 Coto · 💳 Código QR` |
+| 3 | una **foto** de un ticket | `📷 Leyendo el comprobante…` y después lo mismo que arriba |
+| 4 | un **PDF** de resumen bancario | `📄 Leyendo el PDF…` y después el gasto clasificado |
 
 Después de cada uno, la última línea te dice cuánto va sumando el mes:
 
@@ -252,7 +255,8 @@ Después de cada uno, la última línea te dice cuánto va sumando el mes:
 ```
 
 Y entrá al dashboard: el gasto ya está cargado, con su categoría, medio de pago
-y comercio. 🎉
+y comercio. 🎉 También entrá desde el **celular**: la pantalla se acomoda sola
+(menú lateral, tablas y gráficos adaptados al ancho).
 
 **Casos que también vas a ver:**
 

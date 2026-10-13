@@ -29,6 +29,31 @@ límites.
 
 ---
 
+## Qué incluye
+
+- **Dashboard:** KPI del período, detalle por categoría con límite y estado, y
+  **gráfico de torta con el porcentaje y el importe de cada categoría** (dentro
+  del gráfico, en la leyenda y al tocar cada porción), más el peso de cada
+  medio de pago y la evolución mensual. En la lista de gastos, **cada comprobante
+  muestra su importe y su % del total filtrado**.
+- **Gráficos con volumen:** la torta y las barras se dibujan en **3D** (cara
+  superior, lateral y sombra), con **animación de entrada** al abrir cada
+  vista y **iluminación al pasar el mouse**: el segmento se enciende, los demás
+  se atenúan y el centro muestra ese renglón con su importe y porcentaje.
+  Se respeta a quien pide menos movimiento en el sistema.
+- **Registro completo:** fecha, categoría y subcategoría, detalle, importe,
+  medio de pago (**efectivo, débito, crédito, transferencia, Mercado Pago,
+  código QR, cheque u otro**), comercio y observación.
+- **Categorías y subcategorías** con alta, modificación y baja, **límites por
+  categoría** con aviso al 80% y corte al 100%.
+- **Pensada para el celular:** menú lateral, tablas que se acomodan, botones y
+  campos grandes, sin el zoom automático de iOS y gráficos que se redibujan al
+  rotar la pantalla. Se usa cómoda desde el teléfono.
+- **Fechas en tu huso horario:** los comprobantes mandados de noche se cargan
+  en el día que son, no en el día UTC.
+
+---
+
 ## 1. Usarla solo en el navegador (como siempre)
 
 Abrí `index.html` con doble clic. Todo funciona igual que antes: los datos se
@@ -174,10 +199,16 @@ Cada 30 segundos (y al volver a la pestaña) la pantalla se refresca sola.
 npm test
 ```
 
-- **37** aserciones del servidor (motor, clasificación por comercio, contraseña,
-  fusión de estados, webhook, polling, alertas al celular, PDF y foto con OCR,
-  y el aprendizaje de palabras nuevas).
-- **16** aserciones del dashboard en modo nube, local y de contraseña.
+- **39** aserciones del servidor (motor, clasificación por comercio, contraseña,
+  fusión de estados, webhook, polling, alertas al celular, medio de pago con
+  código QR, PDF y foto con OCR, y el aprendizaje de palabras nuevas).
+- **71** aserciones del dashboard: modo nube, local y de contraseña, medio de
+  pago con código QR, gráfico con % e importe, el volumen 3D de los gráficos,
+  las animaciones de entrada, la iluminación al pasar el mouse, y todo el
+  comportamiento en pantalla de celular (menú, columnas ocultas, gráfico
+  compacto, rotación).
+
+Con las pruebas del navegador sin servidor quedan **201 aserciones** en verde.
 
 ## 9. Limitaciones conocidas
 

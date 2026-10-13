@@ -168,7 +168,8 @@ async function principal(){
     console.log('\n7. Webhook de Telegram');
     chk((await api(base+'/webhook/telegram', {method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'mal'},body:JSON.stringify({})})).status === 403, 'secreto incorrecto → 403');
     const upd = n => JSON.stringify({ update_id:n, message:{ chat:{id:777, type:'private'}, date:Date.now()/1000|0,
-      text:{101:'Compra en supermercado Coto $38.560 con débito',102:'Una nota sobre otra cosa del patio',103:'Nafta YPF $61.300 con débito'}[n] } });
+      text:{101:'Compra en supermercado Coto $38.560 con débito',102:'Una nota sobre otra cosa del patio',103:'Nafta YPF $61.300 con débito',
+            104:'Pagué con QR en Coto $4.500'}[n] } });
     const w1 = await api(base+'/webhook/telegram', {method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'whsec-test'},body:upd(101)});
     chk(w1.status === 200, 'secreto correcto → 200');
     await dormir(500);
@@ -180,7 +181,14 @@ async function principal(){
     await api(base+'/webhook/telegram', {method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'whsec-test'},body:upd(102)});
     await dormir(500);
     s = (await api(base+'/api/estado',{headers:H})).body;
-    chk(s.exps.filter(e=>e.amount===38560).length === 1, 'el update repetido no duplica');
+    chk(s.exps.filter(e=>e.amount===38560).length === 1, 'el update repetido no duplica'
+      + (s.exps.filter(e=>e.amount===38560).length!==1 ? ' · ' + JSON.stringify(s.exps.filter(e=>e.amount===38560).map(x=>[x.date, x.detail, x.src, x.id])) : ''));
+
+    await api(base+'/webhook/telegram', {method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'whsec-test'},body:upd(104)});
+    await dormir(600);
+    s = (await api(base+'/api/estado',{headers:H})).body;
+    chk(s.exps.some(e=>e.amount===4500 && e.pay==='Código QR'), 'guarda "Código QR" como medio de pago');
+    chk(s.exps.some(e=>e.amount===4500 && e.cat===s.cats.find(c=>c.name==='Supermercado').id), 'y clasifica el mensaje en Supermercado');
     chk(!s.exps.some(e=>/otra cosa/i.test(e.detail||'')), 'el mensaje de "otra cosa" no se guarda');
 
     console.log('\n8. Alerta enviada al celular');

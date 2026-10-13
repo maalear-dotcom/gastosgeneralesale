@@ -76,6 +76,111 @@ async function main(){
   chk(w2.document.getElementById('loginOverlay') !== null, 'muestra la pantalla de contraseña');
   chk(w2.eval('MODO') === 'local', 'no carga datos del servidor mientras no haya sesión');
 
+  console.log('\n6. Medio de pago "Código QR"');
+  chk(w.eval("parseMedio('Pagué con QR en Coto $38.560')") === 'Código QR', 'reconoce "QR" como medio de pago');
+  chk(w.eval("parseMedio('Coto $38.560 con código QR')") === 'Código QR', 'reconoce "código QR"');
+  chk(w.eval("parseMedio('pagué con mercado pago $5.000')") === 'Mercado Pago', 'Mercado Pago sigue ganando si dice "mercado pago"');
+  chk(w.eval("MEDIOS_LISTA.indexOf('Código QR') > MEDIOS_LISTA.indexOf('Mercado Pago')"), 'figura después de Mercado Pago en la lista');
+  w.eval("go('gastos')");
+  chk(/Código QR/.test(w.document.getElementById('fMedio').innerHTML), 'aparece en el filtro de medio de pago');
+  w.eval("modalGasto(null)");
+  chk(/Código QR/.test(w.document.getElementById('gPay').innerHTML), 'aparece en el formulario de alta');
+  w.eval("closeModal()");
+  chk(w.document.getElementById('gPay') === null, 'el formulario se puede cerrar');
+
+  console.log('\n7. Gráfico del dashboard con % e importe');
+  w.eval("go('dashboard')");
+  await dormir(60);
+  const dash = w.document.getElementById('view-dashboard').innerHTML;
+  const svg  = (dash.match(/<svg[\s\S]*?<\/svg>/) || [''])[0];
+  chk(/<text[^>]*>\d+%<\/text>/.test(svg), 'la torta escribe el porcentaje dentro de cada porción');
+  chk(/<title>[^<]*\$[^<]*·[^<]*%/.test(svg), 'al tocar un segmento se ven importe y porcentaje');
+  const leg = w.document.querySelector('#view-dashboard .legend .legrow');
+  chk(leg !== null, 'la leyenda lista cada categoría');
+  chk(leg && /%/.test(leg.textContent) && /\$/.test(leg.textContent), 'cada fila muestra el % y el importe');
+  chk(leg && leg.querySelector('.share i') !== null, 'y una barra proporcional al peso de la categoría');
+  const pag = w.document.querySelector('#view-dashboard .legrow[style*="cursor:default"]');
+  chk(pag && /%/.test(pag.textContent) && /\$/.test(pag.textContent), 'por medio de pago también muestra % e importe');
+
+  console.log('\n7b. Visual: volumen 3D, animaciones e iluminación');
+  chk(w.document.getElementById('view-dashboard').classList.contains('enter'), 'al entrar a una vista se reproduce la animación de entrada');
+  const cssB = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['',''])[1];
+  chk(/@keyframes fadeUp/.test(cssB) && /@keyframes donutIn/.test(cssB) && /@keyframes barraIn/.test(cssB),
+      'las animaciones de entrada están definidas');
+  chk(/prefers-reduced-motion/.test(cssB), 'se respeta a quien pide menos movimiento en pantalla');
+  chk(w.document.querySelector('#view-dashboard .donut3d') !== null, 'la torta se dibuja en 3D');
+  chk(w.document.querySelectorAll('#view-dashboard .donut3d .dlayer').length === 3, 'con tres capas de profundidad debajo de la cara superior');
+  const dtop = w.document.querySelector('#view-dashboard .donut3d .dtop');
+  chk(dtop !== null && dtop.querySelectorAll('.dseg').length > 0, 'los segmentos de la cara superior son los interactivos');
+  chk(dtop !== null && dtop.querySelector('.dpct') !== null, 'el % va pintado sobre la banda del anillo');
+  const bars = w.document.querySelectorAll('#view-dashboard .barg');
+  chk(bars.length >= 6, 'cada barra del gráfico mensual es un grupo animable');
+  chk(bars[0] !== null && bars[0].querySelectorAll('polygon').length === 2, 'y tiene cara superior y lateral (3D)');
+  chk(bars[0] !== null && bars[0].querySelector('ellipse') !== null, 'con su sombra en el piso');
+
+  const leg0 = w.document.querySelector('#view-dashboard .legend .legrow[data-cat]');
+  const seg0 = leg0 ? w.document.querySelector(`#donut3d .dtop .dseg[data-cat="${leg0.dataset.cat}"]`) : null;
+  chk(leg0 !== null && seg0 !== null, 'la leyenda y la torta comparten la clave de categoría');
+  if(leg0 && seg0){
+    const centro = w.document.getElementById('dCenter');
+    const totalAntes = centro.textContent;
+    leg0.dispatchEvent(new w.Event('mouseenter'));
+    chk(seg0.classList.contains('hov'), 'al pasar el mouse por la leyenda se ilumina su segmento');
+    chk(w.document.getElementById('donut3d').classList.contains('ilum'), 'y los demás segmentos se atenúan');
+    chk(centro.textContent !== totalAntes && /%/.test(centro.textContent),
+        'el centro deja el total y muestra ese renglón con su %');
+    leg0.dispatchEvent(new w.Event('mouseleave'));
+    chk(!seg0.classList.contains('hov'), 'al salir vuelve a la normalidad');
+    chk(centro.textContent === totalAntes, 'y el centro recupera el total');
+    seg0.dispatchEvent(new w.Event('mouseenter'));
+    chk(seg0.classList.contains('hov'), 'pasar el mouse por un segmento también lo ilumina');
+    chk(centro.textContent.indexOf(leg0.querySelector('.nm').textContent) >= 0, 'con su nombre en el centro');
+    seg0.dispatchEvent(new w.Event('mouseleave'));
+    chk(!seg0.classList.contains('hov'), 'al irse se apaga');
+  }
+
+  console.log('\n8. Celular (responsive)');
+  const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['',''])[1];
+  chk(/@media \(max-width:860px\)/.test(css), 'existe la media query para celular');
+  chk(/@media \(max-width:560px\)/.test(css), 'existe la media query para celulares chicos');
+  chk(/\.c-medio/.test(css) && /\.c-obs/.test(css) && /\.c-estado/.test(css), 'las columnas secundarias se ocultan en pantalla chica');
+  chk(/input\.ctl,select\.ctl,textarea\.ctl\{font-size:16px\}/.test(css), 'los campos evitan el zoom automático de iOS');
+  chk(/only-mob/.test(css) && /only-desk/.test(css), 'hay contenido distinto para celular y escritorio');
+  chk(w.document.getElementById('navscrim') !== null, 'tiene el fondo para cerrar el menú lateral');
+  chk(w.document.querySelector('.mobilebar') !== null, 'tiene la barra superior del celular');
+  chk(/viewport-fit=cover/.test(HTML), 'la vista respeta la zona segura del iPhone');
+
+  chk(w.eval('pantallaChica()') === false, 'en escritorio no usa el modo compacto');
+  w.eval("go('gastos')");
+  chk(/only-mob/.test(w.document.getElementById('view-gastos').innerHTML), 'en la tabla de gastos, comercio y medio pasan a una línea para el celular');
+  chk(/c-medio/.test(w.document.getElementById('view-gastos').innerHTML), 'la columna de medio de pago se puede ocultar en el celular');
+  const filaG = w.document.querySelector('#view-gastos tbody tr');
+  chk(filaG && /\$/.test(filaG.querySelectorAll('td')[3].textContent) && /%/.test(filaG.querySelectorAll('td')[3].textContent),
+      'cada gasto de la lista muestra el importe y su % del total');
+
+  w.eval("document.getElementById('mmenu').click()");
+  chk(w.document.getElementById('sidebar').classList.contains('open'), 'el botón ☰ abre el menú');
+  chk(w.document.getElementById('navscrim').classList.contains('on'), 'muestra el fondo detrás del menú');
+  w.document.querySelector('.navbtn[data-view="dashboard"]').click();
+  chk(!w.document.getElementById('sidebar').classList.contains('open'), 'al elegir una opción el menú se cierra');
+  chk(!w.document.getElementById('navscrim').classList.contains('on'), 'y el fondo también');
+
+  Object.defineProperty(w, 'innerWidth', { value:390, configurable:true, writable:true });
+  chk(w.eval('pantallaChica()') === true, 'detecta pantalla de celular');
+  chk(w.eval('mesesGrafico()') === 6, 'en el celular dibuja 6 meses en vez de 12');
+  chk(w.eval('anchoGrafico()') === 340, 'y un gráfico más angosto para que se lea');
+  w.eval("render()");
+  await dormir(60);
+  chk(/últimos 6 meses/.test(w.document.getElementById('view-dashboard').innerHTML), 'el dashboard se redibuja para el celular');
+
+  w.eval("document.getElementById('mmenu').click()");
+  chk(w.document.getElementById('sidebar').classList.contains('open'), 'abre el menú estando en el celular');
+  Object.defineProperty(w, 'innerWidth', { value:1200, configurable:true, writable:true });
+  w.dispatchEvent(new w.Event('resize'));
+  await dormir(400);
+  chk(!w.document.getElementById('sidebar').classList.contains('open'), 'al pasar a escritorio se cierra el menú solo');
+  chk(!w.document.getElementById('navscrim').classList.contains('on'), 'y el fondo oscuro desaparece');
+
   console.log(`\nRESULTADO: ${ok} ok, ${mal} fallos\n`);
   process.exit(mal ? 1 : 0);
 }

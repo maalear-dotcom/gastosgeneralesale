@@ -124,7 +124,7 @@ app.put('/api/estado', requiereAuth, (req,res)=>{
 
 /* ---- backup / restauración ---- */
 app.get('/api/backup', requiereAuth, (req,res)=>{
-  res.setHeader('Content-Disposition','attachment; filename="gastos-generales-'+new Date().toISOString().slice(0,10)+'.json"');
+  res.setHeader('Content-Disposition','attachment; filename="gastos-generales-'+motor.api.hoyISO()+'.json"');
   res.json(estado());
 });
 app.post('/api/restore', requiereAuth, (req,res)=>{
@@ -210,7 +210,7 @@ function ayuda(){
 
 function resumenTotal(){
   const s = estado();
-  const mes = new Date().toISOString().slice(0,7);
+  const mes = motor.api.hoyISO().slice(0,7);
   const [ini,fin] = motor.api.rangoMes(mes);
   const list = s.exps.filter(e=>e.date>=ini && e.date<=fin);
   if(!list.length) return `📊 No hay gastos cargados en ${motor.api.fechaCorta(ini).slice(3)} / ${ini.slice(5,7)}.`;
@@ -243,7 +243,7 @@ async function comando(chatId, texto){
   }
   if(!chatAutorizado(chatId)) return enviar(chatId, mensajeVinculacion(chatId));
   if(c === '/total' || c === '/mes') return enviar(chatId, resumenTotal());
-  if(c === '/alertas') return enviar(chatId, textoAlertas(motor.api.rangoMes(new Date().toISOString().slice(0,7))[0]));
+  if(c === '/alertas') return enviar(chatId, textoAlertas(motor.api.rangoMes(motor.api.hoyISO().slice(0,7))[0]));
   if(c === '/ultimos' || c === '/ultimo'){
     const ult = estado().exps.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'') || (b._ts||0)-(a._ts||0)).slice(0,5);
     if(!ult.length) return enviar(chatId,'Todavía no hay comprobantes guardados.');
