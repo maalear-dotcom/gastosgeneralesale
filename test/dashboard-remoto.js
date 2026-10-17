@@ -186,6 +186,48 @@ async function main(){
   const segD = w.document.querySelector('#view-dashboard #donut3d .dtop .dseg[data-cat]');
   chk(segD !== null, 'los segmentos de la circunferencia se pueden tocar');
 
+  console.log('\n7e. Táctil en la torta: el dedo ilumina y el doble toque abre el detalle');
+  /* jsdom no calcula geometría: sustituimos elementFromPoint por el sector bajo el dedo */
+  w.eval("document.__segTactil = null;"
+       + "document.elementFromPoint = function(){ return document.__segTactil; };");
+  w.eval("UI.gastoCat=''; go('dashboard');");
+  await dormir(60);
+  const dtopT = w.document.querySelector('#view-dashboard #donut3d .dtop');
+  chk(dtopT !== null, 'la cara superior de la circunferencia está en pantalla');
+  const segT = dtopT.querySelector('.dseg');
+  const catT = segT.dataset.cat;
+  w.eval("document.__segTactil = document.querySelector('#donut3d .dtop .dseg');");
+  const toqueT = (tipo, dx=0, dy=0) => {
+    const e = new w.Event(tipo, { bubbles:true, cancelable:tipo!=='touchstart' });
+    e.changedTouches = [{ clientX:120+dx, clientY:120+dy }];
+    e.touches        = [{ clientX:120+dx, clientY:120+dy }];
+    dtopT.dispatchEvent(e);
+    return e;
+  };
+  toqueT('touchstart');
+  chk(w.document.getElementById('donut3d').classList.contains('ilum'),
+      'al pasar el dedo por un sector se enciende el efecto (los demás quedan atenuados, como con el mouse)');
+  chk(dtopT.querySelector('.dseg.hov') === segT, 'y ese sector queda iluminado');
+  chk(w.document.getElementById('dCenter').classList.contains('volando'), 'el centro muestra el renglón de ese sector');
+  chk(toqueT('touchmove', 50, 8).defaultPrevented === true, 'el dedo recorriendo la torta queda capturado (no desplaza la página)');
+  chk(toqueT('touchmove', 8, 50).defaultPrevented === false, 'y el gesto vertical sigue moviendo la página');
+  toqueT('touchend');
+  chk(w.eval("UI.view") === 'dashboard', 'un toque sólo ilumina el sector, no sale del gráfico');
+  await dormir(500);                                  /* se vence la ventana del doble toque */
+  toqueT('touchstart');
+  segT.dispatchEvent(new w.MouseEvent('click', { bubbles:true }));
+  chk(w.eval("UI.view") === 'dashboard', 'el clic sintético que dispara el navegador tras el toque no navega solo');
+  toqueT('touchend');
+  chk(w.eval("UI.view") === 'dashboard', 'el segundo toque (en un instante distinto) tampoco navega');
+  toqueT('touchstart'); toqueT('touchend');
+  chk(w.eval("UI.view") === 'gastos' && w.eval("UI.gastoCat") === catT,
+      'dos toques seguidos sobre el mismo sector abren el detalle de esa categoría');
+  chk(w.document.getElementById('btnBackChart') !== null, 'y desde ahí se puede volver al gráfico');
+  w.eval("UI.gastoCat=''; go('dashboard');");
+  await dormir(60);
+  chk(w.document.querySelector('#donut3d .dtop .dseg') !== null, 'la circunferencia se vuelve a dibujar con su interacción');
+  w.eval("delete document.elementFromPoint; document.__segTactil = null;");
+
   console.log('\n8. Celular (responsive)');
   const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['',''])[1];
   chk(/@media \(max-width:860px\)/.test(css), 'existe la media query para celular');
@@ -202,6 +244,15 @@ async function main(){
   chk(/\.legrow \.share\{flex:0 0 40px\}/.test(css), 'y la barra de proporción se achica para darle lugar al nombre');
   chk(/\.donut \.center span\{max-width:118px/.test(css), 'el rótulo del centro de la circunferencia también se ajusta en pantallas chicas');
   chk(/\.catcell\{flex-wrap:wrap\}/.test(css), 'en la tabla de Detalle por categoría el nombre puede bajar de renglón');
+  const mq860 = css.slice(css.indexOf('@media (max-width:860px){'), css.indexOf('@media (max-width:560px){'));
+  chk(/\.grid-2 > \.card:nth-child\(1\)\{order:2\}/.test(mq860) && /\.grid-2 > \.card:nth-child\(2\)\{order:1\}/.test(mq860),
+      'en celular la Distribución general sube antes del Detalle por categoría');
+  chk(!/\.grid-2 > \.card:nth-child\(/.test(css.slice(0, css.indexOf('@media (max-width:860px){'))),
+      'y en escritorio el orden de las dos tarjetas no cambia');
+  const grid2 = w.document.querySelector('#view-dashboard .grid-2');
+  chk(grid2 && /Detalle por categoría/.test(grid2.children[0].textContent)
+            && /Distribución general/.test(grid2.children[1].textContent),
+      'el orden del código sigue siendo el mismo (el cambio es sólo visual, por CSS)');
   chk(/input\.ctl,select\.ctl,textarea\.ctl\{font-size:16px\}/.test(css), 'los campos evitan el zoom automático de iOS');
   chk(/only-mob/.test(css) && /only-desk/.test(css), 'hay contenido distinto para celular y escritorio');
   chk(w.document.getElementById('navscrim') !== null, 'tiene el fondo para cerrar el menú lateral');

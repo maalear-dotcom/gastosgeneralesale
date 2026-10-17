@@ -311,6 +311,10 @@ input.ctl:hover,select.ctl:hover,textarea.ctl:hover{border-color:#cdd5e8}
   .mobilebar .mm:active{background:rgba(255,255,255,.12)}
   .main{padding:14px 12px calc(46px + env(safe-area-inset-bottom))}
   .grid-2b,.row2,.row3{grid-template-columns:1fr}
+  /* En celular, en el Dashboard el gráfico de la circunferencia se ve primero
+     que la tabla de "Detalle por categoría" */
+  .grid-2 > .card:nth-child(1){order:2}
+  .grid-2 > .card:nth-child(2){order:1}
   .grid-kpi{grid-template-columns:1fr 1fr;gap:10px}
   .kpi{padding:11px 13px}
   .kpi .val{font-size:19px}
@@ -1253,6 +1257,48 @@ function resaltar(cid){
   }
 }
 
+/* Ir al detalle de los gastos de una categoría (lo usan la torta y su leyenda) */
+function abrirDetalleCat(cat){ UI.gastoCat=cat; go('gastos'); }
+
+/* En celular no hay mouse: el dedo que recorre la torta va iluminando cada
+   sector (los demás quedan atenuados, igual que al pasar el cursor) y un doble
+   toque sobre el mismo sector abre su detalle. Sólo se engancha a eventos
+   táctiles, así que en escritorio no cambia nada. */
+function tactilDonut(){
+  const dtop=$('#donut3d .dtop');
+  if(!dtop || typeof document.elementFromPoint!=='function') return;
+  let x0=0, y0=0, arrastrando=false, ultimo={cat:null,ts:0};
+  const segBajo = t => { const el=document.elementFromPoint(t.clientX,t.clientY);
+                         return el && el.closest? el.closest('.dseg') : null; };
+  dtop.addEventListener('touchstart', ev=>{
+    const t=ev.changedTouches && ev.changedTouches[0]; if(!t) return;
+    const s=segBajo(t);
+    if(!s){ resaltar(null); return; }            /* toque en el hueco: se apaga el resaltado */
+    arrastrando=true;
+    dtop.__tactilTs=Date.now();                  /* el clic sintético que sigue no debe abrir el detalle */
+    x0=t.clientX; y0=t.clientY;
+    resaltar(s.dataset.cat);                     /* mismo efecto que al pasar el mouse */
+  }, {passive:true});
+  dtop.addEventListener('touchmove', ev=>{
+    if(!arrastrando) return;
+    const t=ev.touches && ev.touches[0]; if(!t) return;
+    const s=segBajo(t); if(!s) return;
+    const dx=Math.abs(t.clientX-x0), dy=Math.abs(t.clientY-y0);
+    if(dy>dx*1.2) return;                        /* el gesto vertical sigue moviendo la página */
+    if(ev.cancelable) ev.preventDefault();
+    resaltar(s.dataset.cat);                     /* el dedo recorre la torta sector por sector */
+  }, {passive:false});
+  dtop.addEventListener('touchend', ev=>{
+    if(!arrastrando) return;
+    arrastrando=false;
+    const t=ev.changedTouches && ev.changedTouches[0]; if(!t) return;
+    const s=segBajo(t); if(!s) return;
+    const cat=s.dataset.cat, ts=Date.now();
+    if(ultimo.cat===cat && ts-ultimo.ts<=420){ ultimo={cat:null,ts:0}; abrirDetalleCat(cat); }
+    else ultimo={cat, ts};                       /* el primer toque sólo ilumina */
+  });
+}
+
 /* =========================================================
    9. VISTA: DASHBOARD
    ========================================================= */
@@ -1415,15 +1461,19 @@ function renderDashboard(){
   $('#pickMes').onchange=e=>{UI.mes=e.target.value||UI.mes;render()};
   $$('[data-exp]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const id=b.dataset.exp;UI.open[id]=!UI.open[id];render()});
   $$('.legrow[data-cat]').forEach(b=>{
-    b.onclick=()=>{UI.gastoCat=b.dataset.cat;go('gastos')};
+    b.onclick=()=>abrirDetalleCat(b.dataset.cat);
     b.onmouseenter=()=>resaltar(b.dataset.cat);
     b.onmouseleave=()=>resaltar(null);
   });
   $$('#donut3d .dtop .dseg').forEach(s=>{
     s.onmouseenter=()=>resaltar(s.dataset.cat);
     s.onmouseleave=()=>resaltar(null);
-    s.onclick=()=>{UI.gastoCat=s.dataset.cat;go('gastos')};
+    s.onclick=()=>{ const dtop=$('#donut3d .dtop');
+      /* En celular el toque ya lo maneja tactilDonut() (iluminar / doble toque) */
+      if(dtop && Date.now()-(dtop.__tactilTs||0) < 700) return;
+      abrirDetalleCat(s.dataset.cat); };
   });
+  tactilDonut();
   $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
 }
 
