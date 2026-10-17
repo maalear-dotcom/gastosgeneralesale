@@ -332,6 +332,14 @@ input.ctl:hover,select.ctl:hover,textarea.ctl:hover{border-color:#cdd5e8}
   .donutbox{justify-content:center}
   .legend{flex:1 1 100%;min-width:0;max-height:none}
   .legrow .share{flex:0 0 54px}
+  /* Los nombres ("Supermercado", "Alimentación") se parten en varias líneas
+     en vez de cortarse con puntos suspensivos */
+  .legrow .nm{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3;overflow-wrap:break-word}
+  .legrow .pp{width:44px;flex:0 0 auto}
+  .donut .center span{max-width:130px;overflow-wrap:break-word}
+  /* La tabla de "Detalle por categoría": si el nombre no entra en el renglón
+     baja a una línea propia en lugar de pisarse con el importe */
+  .catcell{flex-wrap:wrap}
   /* iOS hace zoom automático si el texto del campo es chico */
   input.ctl,select.ctl,textarea.ctl{font-size:16px}
   .card .cbody{padding:15px 14px}
@@ -340,17 +348,17 @@ input.ctl:hover,select.ctl:hover,textarea.ctl:hover{border-color:#cdd5e8}
   .tabs2::-webkit-scrollbar{display:none}
   .tabs2 button{white-space:nowrap;flex:0 0 auto}
 
-  /* Categorías: la fila se apila en dos renglones para que el ícono, el nombre
-     y los botones no se pisen entre sí ni tapen el texto en pantallas chicas */
-  .catrow .top{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;
-    grid-template-areas:"exp nm nm acts" "lim lim pill pill";
-    gap:7px 10px;padding:11px 12px;align-items:center}
+  /* Categorías: la fila se apila en tres renglones para que el nombre completo
+     ("Supermercado", "Alimentación") entre entero y pegado al borde izquierdo */
+  .catrow .top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-areas:"exp nm nm" "lim lim pill" "acts acts acts";
+    gap:6px 10px;padding:10px 10px;align-items:center}
   .catrow .expander{grid-area:exp}
-  .catrow .nm{grid-area:nm;min-width:0}
-  .catrow .nm input{width:100%;min-width:0;max-width:100%!important}   /* el estilo en línea trae max-width:230px */
-  .catrow .acts{grid-area:acts}
+  .catrow .nm{grid-area:nm;min-width:0;gap:7px}
+  .catrow .nm input{width:100%;min-width:0;max-width:100%!important;padding:6px 4px}   /* el estilo en línea trae max-width:230px */
   .catrow .lim{grid-area:lim;white-space:normal;min-width:0}
   .catrow .top > .pill{grid-area:pill;justify-self:end}
+  .catrow .acts{grid-area:acts;justify-self:end}
   .catrow .detail{padding:0 12px 12px;padding-top:11px}
 }
 @media (max-width:560px){
@@ -363,7 +371,11 @@ input.ctl:hover,select.ctl:hover,textarea.ctl:hover{border-color:#cdd5e8}
   .mhead{padding:15px 16px}
   .card{border-radius:12px}
   .donut{width:196px;height:196px;flex-basis:196px}
-  .legend .legrow{font-size:12.4px}
+  .legend .legrow{font-size:12.4px;gap:6px;padding:5px 4px}
+  /* más lugar para el nombre de la categoría en pantallas chicas */
+  .legrow .share{flex:0 0 40px}
+  .legrow .pp{width:40px}
+  .donut .center span{max-width:118px;font-size:10.5px}
 }
 @media (min-width:861px){.only-mob{display:none}}
 </style>
@@ -1467,6 +1479,7 @@ function renderGastos(){
   <div class="pagehead">
     <div><h1>Gastos</h1><div class="sub">Fecha + Categoría + Detalle + Importe + Medio de pago + Comercio + Observación</div></div>
     <div class="headtools">
+      ${UI.gastoCat?`<button class="btn" id="btnBackChart" style="margin-right:auto" title="Volver al dashboard">← Volver al gráfico</button>`:''}
       <button class="btn" id="btnCsv">⬇ Exportar CSV</button>
       <button class="btn primary" id="btnNew">＋ Nuevo gasto</button>
     </div>
@@ -1500,6 +1513,9 @@ function renderGastos(){
   $('#fMes').onchange=e=>{ if(e.target.value){UI.mes=e.target.value;UI.periodo='mes';UI.gastoDesde=rangoMes(UI.mes)[0];UI.gastoHasta=rangoMes(UI.mes)[1];render();} };
   $('#fClear').onclick=()=>{UI.gastoQ='';UI.gastoCat='';UI.gastoMedio='';UI.gastoDesde='';UI.gastoHasta='';render()};
   $('#btnCsv').onclick=exportCSV;
+  /* Al llegar al detalle desde el donut (tocar una opción de la circunferencia),
+     el encabezado ofrece volver al gráfico del dashboard */
+  $('#btnBackChart') && ($('#btnBackChart').onclick=()=>{ UI.gastoCat=''; go('dashboard') });
   $('#btnNew').onclick=()=>modalGasto(null);
   $('#btnNew2') && ($('#btnNew2').onclick=()=>modalGasto(null));
   $$('[data-edit]').forEach(tr=>tr.onclick=ev=>{ if(ev.target.closest('[data-del]')) return; modalGasto(tr.dataset.edit) });

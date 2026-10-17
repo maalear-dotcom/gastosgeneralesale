@@ -168,15 +168,40 @@ async function main(){
       'dos gastos en la misma subcategoría se listan los dos (no se agrupan en uno)');
   chk(filasC.some(t=>/2 gastos/.test(t)), 'el subtotal de la subcategoría suma los 2 gastos');
 
+  console.log('\n7d. Tocar una opción del donut y volver al gráfico');
+  w.eval("UI.gastoCat=''; go('dashboard');");
+  await dormir(60);
+  chk(w.document.getElementById('btnBackChart') === null, 'sin filtro de categoría no aparece el botón de volver');
+  const legD = w.document.querySelector('#view-dashboard .legend .legrow[data-cat]');
+  chk(legD !== null, 'la leyenda del donut tiene filas para tocar');
+  legD.click();
+  await dormir(60);
+  chk(w.eval("UI.view") === 'gastos' && w.eval("UI.gastoCat") === legD.dataset.cat, 'tocar una opción del donut abre el detalle de esa categoría');
+  const btnBack = w.document.getElementById('btnBackChart');
+  chk(btnBack !== null, 'el detalle ofrece "← Volver al gráfico"');
+  btnBack.click();
+  await dormir(60);
+  chk(w.eval("UI.view") === 'dashboard', 'el botón regresa al dashboard');
+  chk(w.eval("UI.gastoCat") === '', 'y limpia el filtro de categoría');
+  const segD = w.document.querySelector('#view-dashboard #donut3d .dtop .dseg[data-cat]');
+  chk(segD !== null, 'los segmentos de la circunferencia se pueden tocar');
+
   console.log('\n8. Celular (responsive)');
   const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['',''])[1];
   chk(/@media \(max-width:860px\)/.test(css), 'existe la media query para celular');
   chk(/@media \(max-width:560px\)/.test(css), 'existe la media query para celulares chicos');
   chk(/\.c-medio/.test(css) && /\.c-obs/.test(css) && /\.c-estado/.test(css), 'las columnas secundarias se ocultan en pantalla chica');
-  chk(/grid-template-areas:"exp nm nm acts" "lim lim pill pill"/.test(css),
-      'en celular la fila de Categorías se apila en dos renglones (no se pisan ícono, nombre y botones)');
+  chk(/grid-template-areas:"exp nm nm" "lim lim pill" "acts acts acts"/.test(css),
+      'en celular el nombre de la categoría ocupa todo el ancho de la 1ª línea (los botones bajan, no lo aprietan)');
+  chk(/\.catrow \.nm input\{[^}]*max-width:100%!important[^}]*padding:6px 4px/.test(css),
+      'y el campo del nombre se acerca al borde izquierdo con todo el ancho disponible');
   chk(/\.catrow \.nm input\{[^}]*max-width:100%!important/.test(css), 'el campo del nombre de la categoría se encoge hasta el ancho disponible');
   chk(/\.catrow \.lim\{[^}]*white-space:normal/.test(css), 'el texto del límite se parte en varias líneas en vez de desbordar');
+  chk(/\.legrow \.nm\{white-space:normal;overflow:visible;text-overflow:clip/.test(css),
+      'en celular los nombres de la leyenda (Supermercado, Alimentación) se parten en varias líneas, no se cortan');
+  chk(/\.legrow \.share\{flex:0 0 40px\}/.test(css), 'y la barra de proporción se achica para darle lugar al nombre');
+  chk(/\.donut \.center span\{max-width:118px/.test(css), 'el rótulo del centro de la circunferencia también se ajusta en pantallas chicas');
+  chk(/\.catcell\{flex-wrap:wrap\}/.test(css), 'en la tabla de Detalle por categoría el nombre puede bajar de renglón');
   chk(/input\.ctl,select\.ctl,textarea\.ctl\{font-size:16px\}/.test(css), 'los campos evitan el zoom automático de iOS');
   chk(/only-mob/.test(css) && /only-desk/.test(css), 'hay contenido distinto para celular y escritorio');
   chk(w.document.getElementById('navscrim') !== null, 'tiene el fondo para cerrar el menú lateral');
