@@ -339,6 +339,19 @@ input.ctl:hover,select.ctl:hover,textarea.ctl:hover{border-color:#cdd5e8}
   .tabs2{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -12px 15px;padding:0 12px}
   .tabs2::-webkit-scrollbar{display:none}
   .tabs2 button{white-space:nowrap;flex:0 0 auto}
+
+  /* Categorías: la fila se apila en dos renglones para que el ícono, el nombre
+     y los botones no se pisen entre sí ni tapen el texto en pantallas chicas */
+  .catrow .top{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;
+    grid-template-areas:"exp nm nm acts" "lim lim pill pill";
+    gap:7px 10px;padding:11px 12px;align-items:center}
+  .catrow .expander{grid-area:exp}
+  .catrow .nm{grid-area:nm;min-width:0}
+  .catrow .nm input{width:100%;min-width:0;max-width:100%!important}   /* el estilo en línea trae max-width:230px */
+  .catrow .acts{grid-area:acts}
+  .catrow .lim{grid-area:lim;white-space:normal;min-width:0}
+  .catrow .top > .pill{grid-area:pill;justify-self:end}
+  .catrow .detail{padding:0 12px 12px;padding-top:11px}
 }
 @media (max-width:560px){
   .grid-kpi{grid-template-columns:1fr 1fr}
@@ -1052,8 +1065,9 @@ function totales(ini,fin){
   const total=list.reduce((a,e)=>a+e.amount,0);
   const porCat={};
   for(const e of list){
-    if(!porCat[e.cat]) porCat[e.cat]={total:0,n:0,subs:{}};
+    if(!porCat[e.cat]) porCat[e.cat]={total:0,n:0,subs:{},list:[]};
     porCat[e.cat].total+=e.amount; porCat[e.cat].n++;
+    porCat[e.cat].list.push(e);            /* cada gasto del período, para el detalle */
     if(e.sub) porCat[e.cat].subs[e.sub]=(porCat[e.cat].subs[e.sub]||0)+e.amount;
   }
   return {list,total,porCat};
@@ -1263,18 +1277,37 @@ function renderDashboard(){
       <td class="num c-estado">${e.lim? (e.p>=100?`<span class="pill bad">Superado</span>`: e.p>=S.cfg.warnPct?`<span class="pill warn">Alerta ${pct(e.p)}</span>`:`<span class="pill ok">OK</span>`) : '—'}</td>
     </tr>`;
     if(open){
-      const subs = porCat[it.id].subs;
-      const keys = c.subs.map(s=>s.id).filter(id=>subs[id]);
-      Object.keys(subs).forEach(id=>{ if(!keys.includes(id)) keys.push(id); });
-      if(!keys.length) rows += `<tr class="subrow"><td colspan="4" style="padding-left:52px;color:var(--ink-3)">Sin subcategorías con movimiento</td></tr>`;
-      keys.forEach(sid=>{
-        const v=subs[sid]||0;
-        const sp = it.value? v/it.value*100:0;
+      /* El desplegado lista gasto por gasto agrupado por subcategoría.
+         Los gastos sin subcategoría también aparecen ("Sin subcategoría"),
+         así la suma del detalle siempre coincide con el contador "N gastos". */
+      const gastos = (porCat[it.id].list||[]).slice()
+        .sort((a,b)=> String(b.date).localeCompare(String(a.date)) || (b._ts||0)-(a._ts||0));
+      const grupos=[]; const porKey={};
+      gastos.forEach(g=>{
+        const key = g.sub || '';
+        if(!porKey[key]){ porKey[key]={key, n:0, total:0}; grupos.push(porKey[key]); }
+        porKey[key].n++; porKey[key].total += g.amount;
+      });
+      const ordenSub = sid => { const i=c.subs.findIndex(s=>s.id===sid); return i<0? 999 : i; };
+      grupos.sort((a,b)=> ordenSub(a.key)-ordenSub(b.key));
+
+      if(!grupos.length) rows += `<tr class="subrow"><td colspan="4" style="padding-left:52px;color:var(--ink-3)">Sin gastos en ${etiquetaPeriodo()}</td></tr>`;
+      grupos.forEach(gp=>{
+        const nombre = gp.key? subName(it.id, gp.key) : 'Sin subcategoría';
+        const sp = it.value? gp.total/it.value*100 : 0;
         rows += `<tr class="subrow">
-          <td style="padding-left:56px">└ ${esc(subName(it.id,sid))}</td>
-          <td class="num">${mostrarMonto?money(v):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?`<span style="color:var(--ink-3)">${pct(sp)}</span>`:''}</td>
-          <td class="num" style="color:var(--ink-3);font-size:12px">${pct(total? v/total*100:0)} del total</td>
+          <td style="padding-left:56px">└ ${esc(nombre)} <span style="color:var(--ink-3)">· ${gp.n} gasto${gp.n>1?'s':''}</span></td>
+          <td class="num">${mostrarMonto?money(gp.total):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?`<span style="color:var(--ink-3)">${pct(sp)}</span>`:''}</td>
+          <td class="num" style="color:var(--ink-3);font-size:12px">${pct(total? gp.total/total*100:0)} del total</td>
           <td class="c-estado"></td></tr>`;
+        gastos.filter(x=> (x.sub||'')===gp.key).forEach(g=>{
+          const pg = it.value? g.amount/it.value*100 : 0;
+          rows += `<tr class="subrow">
+            <td style="padding-left:74px;color:var(--ink-3)">└ ${esc(g.detail||'Gasto')}${g.merchant? ' · 🏪 '+esc(g.merchant):''}${g.pay? ' · 💳 '+esc(g.pay):''}<div class="mini">${fechaCorta(g.date)}</div></td>
+            <td class="num">${mostrarMonto?money(g.amount):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?`<span style="color:var(--ink-3)">${pct(pg)}</span>`:''}</td>
+            <td class="num" style="color:var(--ink-3);font-size:12px">${pct(total? g.amount/total*100:0)} del total</td>
+            <td class="c-estado"></td></tr>`;
+        });
       });
     }
   });

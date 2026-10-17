@@ -139,11 +139,44 @@ async function main(){
     chk(!seg0.classList.contains('hov'), 'al irse se apaga');
   }
 
+  console.log('\n7c. Detalle por categoría: el contador coincide con lo desplegado');
+  w.eval("UI.periodo='todo';");
+  w.eval(`
+    var sup = S.cats.find(c=>c.name==='Supermercado');
+    S.exps = [
+      { id:'d1', date:'2026-10-01', cat:sup.id, sub:sup.subs[0].id, detail:'Yerba', amount:1000, pay:'Efectivo', merchant:'Coto', notes:'', src:'manual', _ts:1 },
+      { id:'d2', date:'2026-10-02', cat:sup.id, sub:null,           detail:'Regalo', amount:2000, pay:'',        merchant:'',     notes:'', src:'manual', _ts:2 }
+    ];
+    UI.open = {}; UI.open[sup.id] = true;
+    go('dashboard');
+  `);
+  await dormir(60);
+  let dashC = w.document.getElementById('view-dashboard').innerHTML;
+  chk(/2 gastos/.test(dashC), 'la categoría con 2 gastos avisa "2 gastos"');
+  let filasC = Array.from(w.document.querySelectorAll('#view-dashboard tbody tr.subrow')).map(f=>f.textContent);
+  chk(filasC.some(t=>/Sin subcategoría/.test(t)), 'el gasto sin subcategoría se lista igual ("Sin subcategoría")');
+  chk(filasC.some(t=>/Yerba/.test(t)) && filasC.some(t=>/Regalo/.test(t)), 'los 2 gastos aparecen desplegados, uno por renglón');
+  chk(filasC.filter(t=>/· 1 gasto\b/.test(t)).length===2, 'cada subcategoría agrupada indica cuántos gastos suma');
+  w.eval(`
+    var sup2 = S.cats.find(c=>c.name==='Supermercado');
+    S.exps[1].sub = sup2.subs[0].id;      /* los 2 gastos caen en la MISMA subcategoría */
+    save(); render();
+  `);
+  await dormir(60);
+  filasC = Array.from(w.document.querySelectorAll('#view-dashboard tbody tr.subrow')).map(f=>f.textContent);
+  chk(filasC.filter(t=>/Yerba/.test(t)).length===1 && filasC.filter(t=>/Regalo/.test(t)).length===1,
+      'dos gastos en la misma subcategoría se listan los dos (no se agrupan en uno)');
+  chk(filasC.some(t=>/2 gastos/.test(t)), 'el subtotal de la subcategoría suma los 2 gastos');
+
   console.log('\n8. Celular (responsive)');
   const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['',''])[1];
   chk(/@media \(max-width:860px\)/.test(css), 'existe la media query para celular');
   chk(/@media \(max-width:560px\)/.test(css), 'existe la media query para celulares chicos');
   chk(/\.c-medio/.test(css) && /\.c-obs/.test(css) && /\.c-estado/.test(css), 'las columnas secundarias se ocultan en pantalla chica');
+  chk(/grid-template-areas:"exp nm nm acts" "lim lim pill pill"/.test(css),
+      'en celular la fila de Categorías se apila en dos renglones (no se pisan ícono, nombre y botones)');
+  chk(/\.catrow \.nm input\{[^}]*max-width:100%!important/.test(css), 'el campo del nombre de la categoría se encoge hasta el ancho disponible');
+  chk(/\.catrow \.lim\{[^}]*white-space:normal/.test(css), 'el texto del límite se parte en varias líneas en vez de desbordar');
   chk(/input\.ctl,select\.ctl,textarea\.ctl\{font-size:16px\}/.test(css), 'los campos evitan el zoom automático de iOS');
   chk(/only-mob/.test(css) && /only-desk/.test(css), 'hay contenido distinto para celular y escritorio');
   chk(w.document.getElementById('navscrim') !== null, 'tiene el fondo para cerrar el menú lateral');
