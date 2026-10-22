@@ -37,6 +37,9 @@ const TOKEN        = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const URL_PUBLICA  = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/,'');
 const CHAT_ENV     = (process.env.TELEGRAM_CHAT_ID || '').trim();
 const ARCHIVO      = process.env.DATA_FILE || path.join(__dirname, 'data', 'estado.json');
+/* ¿El archivo de datos existía al arrancar? Si no, o el disco se borró (plan gratis)
+   o es la primera vez: sirve para avisar por Telegram si faltan los datos. */
+const HABIA_ARCHIVO = fs.existsSync(ARCHIVO);
 const SECRETO_WEB  = process.env.TELEGRAM_WEBHOOK_SECRET ||
   (TOKEN ? crypto.createHash('sha256').update('webhook|' + TOKEN).digest('hex').slice(0,32) : '');
 const CLAVE_SESS   = crypto.createHash('sha256').update('sesion|' + (CLAVE || 'gastos') + '|' + (TOKEN || '')).digest('hex');
@@ -55,6 +58,99 @@ function estado(){ return motor.api.estado(); }
 function tocar(){                                  // marca cambio y persiste
   const s = estado(); s._rev = (s._rev || 0) + 1;
   motor.api.setEstado(s); motor.api.guardar(); motor.flush();
+  avisarFaltaDeDatos();
+  programarRespaldo();
+}
+
+/* ============================================================
+   RESPALDO AUTOMÁTICO POR TELEGRAM
+   ------------------------------------------------------------
+   El plan gratis de Render borra el disco en cada reinicio, así
+   que el estado completo viaja a tu chat de Telegram como
+   archivo .json:
+     • con cada cambio, como mucho cada 6 h (programado)
+     • al apagarse (redeploy/reinicio)
+     • cuando pedís /respaldo
+   Si un día faltan los datos, reenviás ese archivo al bot y él
+   lo restaura. (La API de Telegram no deja leer los propios
+     mensajes del bot, así que la restauración es con el archivo
+     en la mano — el dashboard además se recarga solo desde la
+     caché de cualquier navegador que ya tenga los datos.)
+   ============================================================ */
+const INTERVALO_RESPALDO = 6*3600e3;
+let _tResp = null, _respaldoEnCurso = false, _avisadoFaltaDatos = false;
+
+function programarRespaldo(){
+  if(!TOKEN || _respaldoEnCurso || _tResp) return;
+  if(!chatIdPropio()) return;
+  if(Date.now() - (estado()._respaldoTs || 0) < INTERVALO_RESPALDO) return;
+  _tResp = setTimeout(()=>{
+    _tResp = null;
+    respaldarPorTelegram('programado').catch(e=>console.error('[respaldo]', e.message));
+  }, 3000);
+}
+
+async function respaldarPorTelegram(motivo){
+  if(!TOKEN) return false;
+  const chat = chatIdPropio();
+  if(!chat) return false;
+  const s = estado();
+  if(motivo !== 'manual' && motivo !== 'apagado' &&
+     Date.now() - (s._respaldoTs || 0) < INTERVALO_RESPALDO) return false;
+  _respaldoEnCurso = true;
+  try{
+    const monto = (s.exps||[]).reduce((a,e)=>a + Number(e.amount||0), 0);
+    const buf = Buffer.from(JSON.stringify(s), 'utf8');
+    const d = new Date();
+    const nombre = 'gastos-respaldo-' + d.toISOString().slice(0,10) + '-' +
+      String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0') + '.json';
+    const pie = `💾 Respaldo (${motivo}) · ${(s.exps||[]).length} gasto${(s.exps||[]).length===1?'':'s'} · ${motor.api.money(monto)}\n` +
+      'Si algún día faltan los datos, reenviame este archivo al bot y lo restauro.';
+    const ok = await enviarDocumento(chat, buf, nombre, pie);
+    if(ok){
+      const st = estado(); st._respaldoTs = Date.now();
+      motor.api.setEstado(st); motor.api.guardar(); motor.flush();
+      console.log('· Respaldo enviado a Telegram (' + motivo + ')');
+    }
+    return ok;
+  }finally{ _respaldoEnCurso = false; }
+}
+
+async function enviarDocumento(chatId, buf, nombre, pie){
+  const fd = new FormData();
+  fd.append('chat_id', String(chatId));
+  fd.append('document', new Blob([buf], { type:'application/json' }), nombre);
+  if(pie) fd.append('caption', pie);
+  const r = await fetch(API_BASE + '/bot' + TOKEN + '/sendDocument', {
+    method:'POST', body: fd, signal: AbortSignal.timeout(20000)
+  });
+  let j = {};
+  try{ j = await r.json(); }catch(e){}
+  if(!j.ok) console.error('[respaldo] sendDocument falló:', j.description || ('HTTP ' + r.status));
+  return !!j.ok;
+}
+
+/* Restaura el estado desde un .json reenviado al bot (sólo para el chat vinculado) */
+function restaurarEstado(b, chatId){
+  const s = motor.api.normalizar(Object.assign({}, b, {
+    _rev: (estado()._rev || 0) + 1,
+    bot: Object.assign({}, estado().bot || {}, b.bot || {}, { chatId, vinculado: (b.bot && b.bot.vinculado) || Date.now() })
+  }));
+  motor.api.setEstado(s); motor.api.invalidarReglas(); motor.api.guardar(); motor.flush();
+  _avisadoFaltaDatos = true;                    /* ya hay datos: no hace falta avisar */
+  console.log('· Restaurado desde Telegram: ' + s.exps.length + ' gastos, ' + s.cats.length + ' categorías');
+}
+
+/* Aviso único si el servidor quedó sin datos y hay un chat al que avisarle */
+function avisarFaltaDeDatos(){
+  if(_avisadoFaltaDatos || !TOKEN || HABIA_ARCHIVO || estado().exps.length) return;
+  const chat = chatIdPropio();
+  if(!chat) return;
+  _avisadoFaltaDatos = true;
+  enviar(chat, '⚠️ <b>Arranqué sin datos guardados</b> (el disco del plan gratis se borró, o es el primer deploy).\n\n' +
+    'Para recuperarlos: reenviame por acá el último archivo <code>.json</code> de respaldo y lo restauro. ' +
+    'Si entrás al dashboard desde un navegador que ya tenga los datos, también se suben solos.')
+    .catch(()=>{});
 }
 
 /* ---------------- Auth por cookie firmada ---------------- */
@@ -116,7 +212,8 @@ app.put('/api/estado', requiereAuth, (req,res)=>{
   const salida = motor.api.normalizar(Object.assign({}, entrante, {
     exps: entrante.exps.concat(extras),
     _borrados: (entrante._borrados||[]).filter(b=>b.ts>corte),
-    _rev: Math.max(entrante._rev||0, actual._rev||0) + 1
+    _rev: Math.max(entrante._rev||0, actual._rev||0) + 1,
+    _respaldoTs: Math.max(entrante._respaldoTs||0, actual._respaldoTs||0) || undefined
   }));
   motor.api.setEstado(salida); motor.api.invalidarReglas(); motor.api.guardar(); motor.flush();
   res.json({ ok:true, _rev: salida._rev, agregados: extras.length });
@@ -204,6 +301,7 @@ function ayuda(){
     `<b>/total</b> — gastos del mes\n` +
     `<b>/alertas</b> — límites y presupuestos\n` +
     `<b>/ultimos</b> — últimos comprobantes\n` +
+    `<b>/respaldo</b> — mandar una copia de seguridad (.json)\n` +
     `<b>/ayuda</b> — esta lista\n` +
     `<b>/vincular &lt;clave&gt;</b> — vincular este número`;
 }
@@ -242,6 +340,12 @@ async function comando(chatId, texto){
     return enviar(chatId, '✅ ¡Listo! Tu número quedó vinculado.\n\nMandame un comprobante (texto, foto o PDF) y lo clasifico.\n\n' + ayuda());
   }
   if(!chatAutorizado(chatId)) return enviar(chatId, mensajeVinculacion(chatId));
+  if(c === '/respaldo'){
+    const ok = await respaldarPorTelegram('manual');
+    return enviar(chatId, ok
+      ? '✅ Te mandé el archivo de respaldo arriba ⬆️. Guardalo en un lugar seguro (Drive, correo, etc.).'
+      : '❌ No pude generar el respaldo: hace falta TELEGRAM_BOT_TOKEN y un chat vinculado.');
+  }
   if(c === '/total' || c === '/mes') return enviar(chatId, resumenTotal());
   if(c === '/alertas') return enviar(chatId, textoAlertas(motor.api.rangoMes(motor.api.hoyISO().slice(0,7))[0]));
   if(c === '/ultimos' || c === '/ultimo'){
@@ -330,6 +434,20 @@ async function procesar(u){
       extra = motor.api.normalizarOCR(await ocr(buf));
     }else if(msg.document){
       const d = msg.document;
+      /* Un .json es un respaldo: lo restaura (sólo el chat vinculado puede) */
+      const esJson = /json/i.test(d.mime_type || '') || /\.json$/i.test(d.file_name || '');
+      if(esJson){
+        const buf = await descargar(d.file_id);
+        let b = null;
+        try{ b = JSON.parse(buf.toString('utf8')); }
+        catch(e){ return enviar(chatId, '❌ Ese archivo no se pudo leer como JSON.'); }
+        if(!b || !Array.isArray(b.cats) || !Array.isArray(b.exps))
+          return enviar(chatId, '❌ Ese archivo no parece un respaldo de Gastos Generales.');
+        restaurarEstado(b, chatId);
+        const s = estado();
+        return enviar(chatId, `✅ <b>Respaldo restaurado</b>: ${s.exps.length} gasto${s.exps.length===1?'':'s'} y ${s.cats.length} categorías.\n\n` +
+          'Entrá al dashboard para verlo. Mandá /respaldo si querés una copia nueva.');
+      }
       const esPdf = /pdf/i.test(d.mime_type || '') || /\.pdf$/i.test(d.file_name || '');
       const esImg = /^image\//.test(d.mime_type || '') || /\.(png|jpe?g|webp)$/i.test(d.file_name || '');
       if(esPdf){
@@ -412,12 +530,26 @@ async function arrancar(){
   }
   console.log('· Datos en ' + path.relative(__dirname, ARCHIVO) + (fs.existsSync(ARCHIVO) ? '' : ' (se crea al primer guardado)'));
 
-  app.listen(PUERTO, ()=> console.log('· Escuchando en http://localhost:' + PUERTO));
+  app.listen(PUERTO, ()=>{
+    console.log('· Escuchando en http://localhost:' + PUERTO);
+    setTimeout(avisarFaltaDeDatos, 4000);   /* si arrancó sin datos, avisa al chat */
+    programarRespaldo();                    /* respaldo si el último tiene más de 6 h */
+  });
 }
 
 if(require.main === module){
-  process.on('SIGINT',  ()=>{ motor.flush(); process.exit(0); });
-  process.on('SIGTERM', ()=>{ motor.flush(); process.exit(0); });
+  let cerrando = false;
+  function cerrar(){
+    if(cerrando) return; cerrando = true;
+    motor.flush();
+    const fin = ()=>process.exit(0);
+    if(!TOKEN) return fin();
+    const tope = setTimeout(fin, 6000);           /* no quedarse colgado por la red */
+    respaldarPorTelegram('apagado')                /* último respaldo antes de morir */
+      .catch(()=>{}).finally(()=>{ clearTimeout(tope); fin(); });
+  }
+  process.on('SIGINT',  cerrar);
+  process.on('SIGTERM', cerrar);
   arrancar().catch(e=>{ console.error(e); process.exit(1); });
 }
 

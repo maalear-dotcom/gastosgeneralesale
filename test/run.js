@@ -29,6 +29,7 @@ async function api(url, opts){
 /* ---------------- Mock de la API de Telegram ---------------- */
 function crearMock(){
   const mensajes = [];
+  const documentos = [];
   let updates = [];
   let archivo = { path:'photos/prueba.jpg', buf:Buffer.alloc(0), mime:'application/octet-stream' };
   const srv = http.createServer((req,res)=>{
@@ -38,6 +39,7 @@ function crearMock(){
       const r = o => { res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(o)); };
       if(p.startsWith('/file/bot')){ res.writeHead(200,{'Content-Type':archivo.mime}); return res.end(archivo.buf); }
       if(p.endsWith('/getMe')) return r({ ok:true, result:{ username:'gastos_de_prueba_bot' } });
+      if(p.endsWith('/sendDocument')){ documentos.push(data||''); return r({ ok:true, result:{ message_id:1000+documentos.length } }); }
       if(p.endsWith('/sendMessage')){ mensajes.push(JSON.parse(data||'{}')); return r({ ok:true, result:{ message_id:mensajes.length } }); }
       if(p.endsWith('/getUpdates')){ const u = updates; updates = []; return r({ ok:true, result:u }); }
       if(p.endsWith('/getFile')) return r({ ok:true, result:{ file_path: archivo.path } });
@@ -45,7 +47,7 @@ function crearMock(){
       return r({ ok:true, result:{} });
     });
   });
-  return { srv, mensajes, setUpdates: u => { updates = u; },
+  return { srv, mensajes, documentos, setUpdates: u => { updates = u; },
            setArchivo: (buf, ruta, mime) => { archivo = { buf, path:ruta, mime }; } };
 }
 
@@ -250,6 +252,34 @@ async function principal(){
     const json = JSON.parse(fs.readFileSync(DATA,'utf8'));
     chk(json.exps.length >= 3 && Array.isArray(json.cats),
         'el archivo tiene los gastos y las categorías (exps=' + (json.exps||[]).length + ', cats=' + (Array.isArray(json.cats)?json.cats.length:'?') + ')');
+
+    console.log('\n11. Respaldo y restauración por Telegram');
+    mock.documentos.length = 0;
+    await enviarUpdate(401, { text:'/respaldo' });
+    await dormir(1500);
+    chk(mock.documentos.length >= 1, 'el comando /respaldo manda el archivo .json al chat');
+    chk(mock.documentos.some(d=>/gastos-respaldo-\d{4}-\d{2}-\d{2}/.test(d)),
+        'el archivo se llama gastos-respaldo-AAAA-MM-DD-hhmm.json');
+
+    const estadoActual = (await api(base+'/api/estado',{headers:H})).body;
+    const paraRestaurar = JSON.parse(JSON.stringify(estadoActual));
+    paraRestaurar.exps.push({ id:'restaurado-tg', date:'2026-10-20', cat:paraRestaurar.cats[0].id, sub:null,
+      detail:'Vuelta desde el respaldo', amount:7777, pay:'', merchant:'', notes:'', src:'texto', _ts:Date.now() });
+    mock.setArchivo(Buffer.from(JSON.stringify(paraRestaurar),'utf8'),
+                    'gastos-respaldo-2026-10-22-1000.json', 'application/json');
+    await enviarUpdate(402, { document:{ file_id:'json1', mime_type:'application/json',
+      file_name:'gastos-respaldo-2026-10-22-1000.json' } });
+    await dormir(1500);
+    s = (await api(base+'/api/estado',{headers:H})).body;
+    chk(s.exps.some(e=>e.id==='restaurado-tg'), 'reenviar el .json al bot restaura el estado');
+    chk(mock.mensajes.some(m=>/Respaldo restaurado/.test(m.text||'')), 'el bot confirma la restauración en el chat');
+    chk(Array.isArray(s.cats) && s.cats.length>=20, 'la restauración mantiene las categorías');
+
+    /* Último respaldo al recibir la señal de apagado (Render manda SIGTERM en cada deploy) */
+    const docsAntes = mock.documentos.length;
+    hijo.kill('SIGTERM');
+    await dormir(2500);
+    chk(mock.documentos.length > docsAntes, 'al apagarse manda un último respaldo');
   } finally {
     hijo.kill('SIGTERM');
     mock.srv.close();

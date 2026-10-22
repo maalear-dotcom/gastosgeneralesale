@@ -167,6 +167,10 @@ git push -u origin main
 
    (`PUBLIC_URL` **no** la cargues a mano: Render la pone sola con la dirección
    del servicio.)
+
+   > **Recomendado (se completa en el Paso 3):** `TELEGRAM_CHAT_ID` con tu ID
+   > de chat. Es lo que le permite al servidor avisarte y recibir tus respaldos
+   > aunque el disco se borre. Tu ID te lo muestra el bot en el Paso 3.
 5. **Create Web Service**. Esperá el deploy (unos 2 minutos). Cuando termine,
    Render te muestra una dirección del tipo:
 
@@ -189,10 +193,20 @@ git push -u origin main
   ✅ `· Bot de Telegram: @...` = el token está bien.
   ✅ `· Webhook: ...` = Telegram ya está avisando a tu servidor.
 
-> ⚠️ **Ojo con los datos en el plan gratis:** Render borra el disco en cada
-> reinicio o redeploy. Hacé *⬇︎ Descargar respaldo* (vista **Alertas** del
-> dashboard) cada tanto. Si no querés pensar en eso, contratá el plan
-> *starter* y activá el bloque `disk` que está comentado en `render.yaml`.
+> ⚠️ **Los datos en el plan gratis:** Render borra el disco en cada reinicio o
+> redeploy, pero **ya no hace falta que hagas nada a mano**: el servidor manda
+> solo una copia de seguridad a tu chat de Telegram (un archivo
+> `gastos-respaldo-….json`), con cambios como mucho cada 6 h y siempre al
+> apagarse. Podés pedir una cuando quieras con `/respaldo`.
+>
+> Si el servidor pierde los datos, tenés **tres formas de recuperarlos**:
+> 1. Entrar al dashboard desde un navegador que ya los tenga → los sube solo.
+> 2. **Reenviarle al bot el último `gastos-respaldo-….json`** del chat →
+>    lo restaura al instante.
+> 3. *⬇︎ Descargar respaldo* / *⬆︎ Restaurar* del dashboard.
+>
+> Con `TELEGRAM_CHAT_ID` configurado, el bot además te avisa por mensaje si
+> arrancó sin datos.
 
 ---
 
@@ -295,6 +309,7 @@ mismo vale para las subcategorías y los límites.
 /total      gastos del mes, por categoría
 /alertas    límites y presupuestos del período
 /ultimos    últimos 5 comprobantes
+/respaldo   manda al chat una copia de seguridad (.json) de todo
 /ayuda      esta lista
 /vincular X vincular este número con la clave X
 ```
@@ -311,7 +326,7 @@ mismo vale para las subcategorías y los límites.
 | Entra al dashboard y te pide la contraseña | es `APP_PASSWORD` | si la olvidaste, cambiala en Render → *Environment* → redeploy |
 | Dice `No pude leer el archivo: ...` | el archivo es muy grande o está dañado | mandá una foto en JPG o PNG |
 | Los mensajes tardan ~30 s en responder | Render gratis se duerme por inactividad | es normal: el primer mensaje lo despierta. Después responde normal |
-| Desplegué y perdí los gastos | el plan gratis borra el disco | restaurá el respaldo (*⬆︎ Restaurar*) y activá el disco del `render.yaml` para que no vuelva a pasar |
+| Desplegué y perdí los gastos | el plan gratis borra el disco | **reenviá al bot el último `gastos-respaldo-….json`** del chat (lo restauro solo), o entrá al dashboard desde un navegador que ya los tenga: los sube solo |
 | Tenía gastos en el navegador y no los veo en la nube | pasa la primera vez | entrá al dashboard con la contraseña estando en la computadora donde tenías los datos: la app los sube sola |
 | Ya no quiero el bot | — | BotFather → `/mybots` → tu bot → *Delete Bot* |
 

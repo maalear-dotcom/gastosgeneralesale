@@ -95,17 +95,18 @@ todavía no hay servidor).
 4. **Deploy**. Al terminar, entrá a la URL con `APP_PASSWORD`.
 
 > **Importante sobre los datos:** el plan gratis de Render **borra el disco en
-> cada reinicio**. Por eso `render.yaml` ya incluye un **disco persistente**
-> (`disk` + `DATA_FILE=/var/data/estado.json`). Para que proteja tus datos:
-> 1. Subí el servicio a un **plan de pago** (Dashboard → tu servicio → Plan).
-> 2. Si el servicio ya existe, agregá el disco desde el panel
->    (**Disk → Add Disk**: `mountPath: /var/data`, `sizeGB: 1**);
->    si es nuevo, Render lo crea solo al leer `render.yaml`.
-> 3. Confirmá que exista la variable `DATA_FILE = /var/data/estado.json`.
+> cada reinicio**. Para que no se pierda nada, el servidor manda una copia de
+> seguridad a tu chat de Telegram (archivo `.json`): con cambios como mucho cada
+> 6 h, al apagarse y con el comando `/respaldo`. Si un día faltan los datos:
+> 1. **Abrí el dashboard desde un navegador que ya los tenga** — los sube solo; o
+> 2. **Reenviá al bot el último `gastos-respaldo-….json`** del chat — lo
+>    restaura al instante; o
+> 3. Usá *⬇︎ Descargar respaldo* / *⬆︎ Restaurar* del dashboard.
 >
-> Aun así conviene usar de vez en cuando el botón *⬇︎ Descargar respaldo* de la
-> vista **Alertas** como copia fuera de la nube: se restaura con *⬆︎ Restaurar*.
-> **Telegram no necesita ningún cambio** por este motivo.
+> Recomendado: agregá `TELEGRAM_CHAT_ID` (tu ID de chat, te lo muestra el bot
+> con `/start`) en Render → *Environment*, así el servidor puede avisarte por
+> Telegram si quedó sin datos. **No hace falta pagar nada en Render ni cambiar
+> nada más en Telegram.**
 
 ## 4. Vincular tu número
 
