@@ -181,8 +181,12 @@ async function principal(){
     await api(base+'/webhook/telegram', {method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'whsec-test'},body:upd(102)});
     await dormir(500);
     s = (await api(base+'/api/estado',{headers:H})).body;
-    chk(s.exps.filter(e=>e.amount===38560).length === 1, 'el update repetido no duplica'
-      + (s.exps.filter(e=>e.amount===38560).length!==1 ? ' · ' + JSON.stringify(s.exps.filter(e=>e.amount===38560).map(x=>[x.date, x.detail, x.src, x.id])) : ''));
+    /* El fixture de la sección 1 (2026-10-12, $38.560) vive en el mismo archivo de
+       datos: para medir el duplicado hay que mirar sólo los que llegaron hoy. */
+    const hoy = new Date().toISOString().slice(0,10);
+    const cotoHoy = () => s.exps.filter(e=>e.amount===38560 && e.date===hoy);
+    chk(cotoHoy().length === 1, 'el update repetido no duplica'
+      + (cotoHoy().length!==1 ? ' · ' + JSON.stringify(s.exps.filter(e=>e.amount===38560).map(x=>[x.date, x.detail, x.src, x.id])) : ''));
 
     await api(base+'/webhook/telegram', {method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'whsec-test'},body:upd(104)});
     await dormir(600);

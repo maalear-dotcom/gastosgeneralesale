@@ -425,6 +425,12 @@ const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => 'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+/* Forma estable de derivar un ID a partir de un nombre ("Supermercado" → "cat-supermercado").
+   Se usa para que la semilla de categorías sea reproducible: aunque el servidor pierda el
+   disco y vuelva a crearla, los IDs coinciden con los de antes y los gastos existentes
+   siguen apuntando a su categoría. */
+const slug = s => String(s??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'x';
 const norm = s => String(s??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
 /* Igual que norm() pero respetando los espacios inicial/final de las palabras clave
    (así “entrada ” o “spa ” no matchean dentro de “entradas” o “españa”). */
@@ -458,7 +464,7 @@ function toast(msg,type='ok',ms=4200){
 function seedCategorias(){
   const C = (name,icon,color,limit,kw,subs)=>({id:uid(),name,icon,color,limit:limit||0,alert:true,kw:kw||[],subs:subs||[]});
   const S = (name,kw,ctx,not)=>({id:uid(),name,kw:kw||[],ctx:ctx||null,not:not||null});
-  return [
+  const lista = [
   C('Alquiler','🏠','#4f46e5',450000,
     ['alquiler','contrato de alquiler','alquiler de propiedad'],
     [S('Expensas',['expensa','expensas'],null),
@@ -621,6 +627,22 @@ function seedCategorias(){
     [],
     [S('Cualquier gasto no contemplado en las categorías anteriores',[],null)])
   ];
+  /* IDs estables derivados del nombre (los uid() de arriba se descartan): la semilla
+     queda reproducible de principio a fin, así un reinicio o deploy sin datos no "rompe"
+     la referencia entre los gastos ya guardados y sus categorías. */
+  const usados = {};
+  lista.forEach(c=>{
+    const base = 'cat-'+slug(c.name);
+    const n = usados[base] = (usados[base]||0)+1;
+    c.id = n>1 ? base+'-'+n : base;
+    const subsUsados = {};
+    c.subs.forEach(s=>{
+      const b = c.id+'|'+slug(s.name);
+      const m = subsUsados[b] = (subsUsados[b]||0)+1;
+      s.id = m>1 ? b+'-'+m : b;
+    });
+  });
+  return lista;
 }
 
 /* =========================================================
@@ -643,7 +665,59 @@ function normalizar(o){
   if(!s.cfg || typeof s.cfg!=='object') s.cfg = {warnPct:80, moneda:'ARS'};
   if(!Array.isArray(s._borrados)) s._borrados = [];
   if(!s.v) s.v = 1;
+  repararCategorias(s);
   return s;
+}
+
+/* Los gastos cuya categoría ya no existe (IDs generados al azar en versiones
+   anteriores, categorías borradas, fusión de estados de orígenes distintos) no
+   desaparecen del tablero: primero se recuperan por el nombre guardado en _catn,
+   después re-clasificando con el MISMO motor de palabras clave que los creó, y si
+   no hay pistas van a una categoría "Sin categoría" visible y editable. Esto es lo
+   que evita que el donut muestre renglones repetidos de "Sin categoría" y que la
+   tabla de detalle ignore esos importes. */
+function repararCategorias(s){
+  if(!Array.isArray(s.exps) || !s.exps.length) return;
+  const ids=new Set(s.cats.map(c=>c.id));
+  const huerf=[];
+  for(const e of s.exps){ if(!e || !e.cat || !ids.has(e.cat)) huerf.push(e); }
+  if(!huerf.length) return;
+  const anterior=S;
+  S=s;                       /* clasificar() y reglas() leen S */
+  try{
+    invalidarReglas();
+    const otros=s.cats.find(c=>norm(c.name)==='otros');
+    let sinCategoria=null;
+    for(const e of huerf){
+      if(!e) continue;
+      let det=null;
+      if(e._catn){
+        const c=s.cats.find(x=>norm(x.name)===norm(e._catn));
+        if(c) det={cat:c.id, sub:(c.subs.find(x=>x.id===e.sub)||{}).id||null};
+      }
+      if(!det){
+        const texto=[e.detail,e.merchant,e.notes,e._raw].filter(Boolean).join(' ');
+        const r=clasificar(texto, e.merchant);
+        /* score 0 cayendo en "Otros" = no hubo ninguna pista real → no lo tomo */
+        if(r && !(r.score===0 && otros && r.cat===otros.id)) det=r;
+      }
+      if(det && det.cat && ids.has(det.cat)){
+        e.cat=det.cat; e.sub=det.sub||null;
+      }else{
+        if(!sinCategoria){
+          sinCategoria=s.cats.find(c=>norm(c.name)==='sin categoria');
+          if(!sinCategoria){
+            sinCategoria={ id:'cat-sin-categoria', name:'Sin categoría', icon:'🏷️',
+              color:'#94a3b8', limit:0, alert:false, kw:[], subs:[] };
+            s.cats.push(sinCategoria); ids.add(sinCategoria.id); invalidarReglas();
+          }
+        }
+        e.cat=sinCategoria.id; e.sub=null;
+      }
+      const nombre=(s.cats.find(c=>c.id===e.cat)||{}).name;
+      if(nombre) e._catn=nombre;
+    }
+  }finally{ S=anterior; }
 }
 function load(){
   try{
@@ -697,11 +771,37 @@ async function conectarServidor(){
     const j=await r.json();
     if(!j || !Array.isArray(j.cats) || !j.cats.length) return 'local';
     S=normalizar(j); MODO='remoto';
-    /* Si el servidor recién arrancó y este navegador ya tenía gastos, los sube una sola vez */
+    /* Fusiono la caché de este navegador con el estado del servidor:
+       - si el servidor quedó vacío (reinicio/deploy sin datos), subo la caché entera;
+       - si no, agrego los gastos que sólo existen acá — respetando lo que se borró
+         en cualquiera de los dos lados — y las categorías propias, sin duplicar
+         categorías que ya existan con el mismo nombre. */
     let cache=null; try{ cache=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
-    if(!S.exps.length && cache && Array.isArray(cache.exps) && cache.exps.length && !(cache._borrados||[]).length){
-      S=normalizar(cache); sincronizar(true);
-    }else{ save(); }
+    if(cache && Array.isArray(cache.exps) && cache.exps.length){
+      const borrados=new Map();
+      (S._borrados||[]).concat(cache._borrados||[]).forEach(b=>{
+        if(b && b.id) borrados.set(b.id, Math.max(borrados.get(b.id)||0, b.ts||0));
+      });
+      const ids=new Set(S.exps.map(e=>e.id));
+      const extras=cache.exps.filter(e=>e && e.id && !ids.has(e.id) && !borrados.has(e.id));
+      if(!S.exps.length && extras.length){
+        S=normalizar(cache); sincronizar(true);
+      }else if(extras.length){
+        const catIds=new Set(S.cats.map(c=>c.id));
+        const catPorNombre=new Map(S.cats.map(c=>[norm(c.name), c.id]));
+        const alias=new Map();                 /* mismo nombre, ID distinto → ID del servidor */
+        (cache.cats||[]).forEach(c=>{
+          if(!c || !c.id || catIds.has(c.id)) return;
+          const propio=catPorNombre.get(norm(c.name));
+          if(propio) alias.set(c.id, propio);
+          else{ S.cats.push(c); catIds.add(c.id); catPorNombre.set(norm(c.name), c.id); }
+        });
+        extras.forEach(e=>{ const a=alias.get(e.cat); if(a) e.cat=a; });
+        S.exps=S.exps.filter(e=>e && !borrados.has(e.id)).concat(extras);
+        S._borrados=[...borrados].map(([id,ts])=>({id, ts}));
+        S=normalizar(S); sincronizar(true);
+      }else save();
+    }else save();
     return 'remoto';
   }catch(e){ return 'local'; }
 }
@@ -1322,7 +1422,7 @@ function renderDashboard(){
 
   let rows='';
   items.forEach(it=>{
-    const c=catById(it.id); if(!c) return;
+    const c=catById(it.id)||{ id:it.id, name:'Sin categoría', icon:'🏷️', color:'#94a3b8', limit:0, alert:false, subs:[] };
     const e = estadoLimite(c, it.value);
     const open = !!UI.open[it.id];
     const p = total? it.value/total*100 : 0;
@@ -1610,6 +1710,7 @@ function modalGasto(id){
       id: e? e.id : uid(),
       date: $('#gDate').value||hoyISO(),
       cat: $('#gCat').value,
+      _catn: (catById($('#gCat').value)||{}).name||'',
       sub: $('#gSub').value||null,
       detail: $('#gDet').value.trim()||'Gasto',
       amount: Math.round(amt*100)/100,
@@ -2151,7 +2252,7 @@ function renderImportar(){
 function persistirDrafts(drafts){
   const guardados=[];
   (drafts||[]).filter(x=>x._st==='nuevo' && x.amount>0 && x.cat).forEach(x=>{
-    const rec={ id:uid(), date:x.date||hoyISO(), cat:x.cat, sub:x.sub||null, detail:x.detail||'Gasto',
+    const rec={ id:uid(), date:x.date||hoyISO(), cat:x.cat, _catn:(catById(x.cat)||{}).name||'', sub:x.sub||null, detail:x.detail||'Gasto',
       amount:x.amount, pay:x.pay||'', merchant:x.merchant||'', notes:x.notes||'', src:x.src||'texto', _ts:Date.now() };
     S.exps.push(rec); guardados.push(rec);
   });

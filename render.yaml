@@ -7,17 +7,33 @@
 #  3. Completá las variables marcadas con "sync: false" en el
 #     panel de Environment del servicio:
 #        APP_PASSWORD · BOT_CLAVE · TELEGRAM_BOT_TOKEN
-#  4. Deploy. Cuando termine, entrá a la URL pública con tu
+#  4. IMPORTANTE (disco persistente): el disco gratis de Render
+#     se borra en cada reinicio. Este archivo ya declara
+#     "disk" + DATA_FILE, pero para que Render lo aplique:
+#        a) Subí el plan del servicio a uno de pago
+#           (Dashboard → tu servicio → Plan/Change Plan).
+#        b) Si el servicio ya existe, agregá el disco a mano:
+#           Dashboard → tu servicio → Disk → Add Disk
+#           mountPath: /var/data · sizeGB: 1
+#           (o recreá el servicio desde este render.yaml).
+#        c) Verificá que exista la variable DATA_FILE
+#           = /var/data/estado.json
+#  5. Deploy. Cuando termine, entrá a la URL pública con tu
 #     contraseña y seguí el README para vincular tu número.
+#     Telegram no necesita ningún cambio: el bot sigue igual.
 # ============================================================
 services:
   - type: web
     name: gastos-generales
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /api/salud
+    disk:
+      name: gastos-datos
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 20
@@ -28,6 +44,11 @@ services:
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      # Datos y caché de OCR viven en el disco persistente
+      - key: DATA_FILE
+        value: /var/data/estado.json
+      - key: TESSERACT_CACHE
+        value: /var/data/ocr
       # URL de este mismo servicio: es la que Telegram va a llamar
       - key: PUBLIC_URL
         fromService:
@@ -36,26 +57,14 @@ services:
           property: hostUrl
 
 # ------------------------------------------------------------
-#  ¿Y si quiero que los datos no se pierdan?
+#  Nota sobre persistencia
 #
-#  El plan gratis de Render borra el disco en cada reinicio o
-#  redeploy. Hay dos salidas:
+#  El disco persistente guarda el archivo de datos (DATA_FILE)
+#  y la caché de OCR entre reinicios y deploys, y Render toma
+#  una instantánea automática cada 24 h (se restaura desde el
+#  panel → Disk → Snapshots).
 #
-#  a) GRATIS: usá el botón "⬇︎ Descargar respaldo" del dashboard
-#     de vez en cuando. El archivo .json se restaura con
-#     "⬆︎ Restaurar".
-#
-#  b) CON DISCO PERSISTENTE: cambiá `plan: free` por `plan: starter`
-#     y agregá abajo este bloque, más la variable DATA_FILE:
-#
-#     disk:
-#       name: gastos-datos
-#       mountPath: /var/data
-#       sizeGB: 1
-#
-#     envVars:
-#       - key: DATA_FILE
-#         value: /var/data/estado.json
-#       - key: TESSERACT_CACHE
-#         value: /var/data/ocr
+#  Aun así, conviene usar de vez en cuando el botón
+#  "⬇︎ Descargar respaldo" del dashboard: el .json se restaura
+#  con "⬆︎ Restaurar" y sirve como copia fuera de la nube.
 # ------------------------------------------------------------

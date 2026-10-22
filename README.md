@@ -95,11 +95,17 @@ todavía no hay servidor).
 4. **Deploy**. Al terminar, entrá a la URL con `APP_PASSWORD`.
 
 > **Importante sobre los datos:** el plan gratis de Render **borra el disco en
-> cada reinicio**. Dos salidas:
-> - **Gratis:** usá el botón *⬇︎ Descargar respaldo* de la vista **Alertas**
->   de vez en cuando, y *⬆︎ Restaurar* si hace falta.
-> - **Persistente:** contratá el plan *starter* y agregá el bloque `disk` que
->   está comentado en `render.yaml`.
+> cada reinicio**. Por eso `render.yaml` ya incluye un **disco persistente**
+> (`disk` + `DATA_FILE=/var/data/estado.json`). Para que proteja tus datos:
+> 1. Subí el servicio a un **plan de pago** (Dashboard → tu servicio → Plan).
+> 2. Si el servicio ya existe, agregá el disco desde el panel
+>    (**Disk → Add Disk**: `mountPath: /var/data`, `sizeGB: 1**);
+>    si es nuevo, Render lo crea solo al leer `render.yaml`.
+> 3. Confirmá que exista la variable `DATA_FILE = /var/data/estado.json`.
+>
+> Aun así conviene usar de vez en cuando el botón *⬇︎ Descargar respaldo* de la
+> vista **Alertas** como copia fuera de la nube: se restaura con *⬆︎ Restaurar*.
+> **Telegram no necesita ningún cambio** por este motivo.
 
 ## 4. Vincular tu número
 
