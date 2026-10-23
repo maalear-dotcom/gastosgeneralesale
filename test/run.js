@@ -30,6 +30,7 @@ async function api(url, opts){
 function crearMock(){
   const mensajes = [];
   const documentos = [];
+  const fotos = [];
   let updates = [];
   let archivo = { path:'photos/prueba.jpg', buf:Buffer.alloc(0), mime:'application/octet-stream' };
   const srv = http.createServer((req,res)=>{
@@ -40,6 +41,7 @@ function crearMock(){
       if(p.startsWith('/file/bot')){ res.writeHead(200,{'Content-Type':archivo.mime}); return res.end(archivo.buf); }
       if(p.endsWith('/getMe')) return r({ ok:true, result:{ username:'gastos_de_prueba_bot' } });
       if(p.endsWith('/sendDocument')){ documentos.push(data||''); return r({ ok:true, result:{ message_id:1000+documentos.length } }); }
+      if(p.endsWith('/sendPhoto')){ fotos.push(data||''); return r({ ok:true, result:{ message_id:2000+fotos.length } }); }
       if(p.endsWith('/sendMessage')){ mensajes.push(JSON.parse(data||'{}')); return r({ ok:true, result:{ message_id:mensajes.length } }); }
       if(p.endsWith('/getUpdates')){ const u = updates; updates = []; return r({ ok:true, result:u }); }
       if(p.endsWith('/getFile')) return r({ ok:true, result:{ file_path: archivo.path } });
@@ -47,7 +49,7 @@ function crearMock(){
       return r({ ok:true, result:{} });
     });
   });
-  return { srv, mensajes, documentos, setUpdates: u => { updates = u; },
+  return { srv, mensajes, documentos, fotos, setUpdates: u => { updates = u; },
            setArchivo: (buf, ruta, mime) => { archivo = { buf, path:ruta, mime }; } };
 }
 
@@ -185,7 +187,10 @@ async function principal(){
     s = (await api(base+'/api/estado',{headers:H})).body;
     /* El fixture de la sección 1 (2026-10-12, $38.560) vive en el mismo archivo de
        datos: para medir el duplicado hay que mirar sólo los que llegaron hoy. */
-    const hoy = new Date().toISOString().slice(0,10);
+    /* Fecha local (igual que usa el motor), no la de UTC: cerca de medianoche
+       se desfasaban y el test marcaba falso positivo. */
+    const _h = new Date();
+    const hoy = `${_h.getFullYear()}-${String(_h.getMonth()+1).padStart(2,'0')}-${String(_h.getDate()).padStart(2,'0')}`;
     const cotoHoy = () => s.exps.filter(e=>e.amount===38560 && e.date===hoy);
     chk(cotoHoy().length === 1, 'el update repetido no duplica'
       + (cotoHoy().length!==1 ? ' · ' + JSON.stringify(s.exps.filter(e=>e.amount===38560).map(x=>[x.date, x.detail, x.src, x.id])) : ''));
@@ -274,6 +279,26 @@ async function principal(){
     chk(s.exps.some(e=>e.id==='restaurado-tg'), 'reenviar el .json al bot restaura el estado');
     chk(mock.mensajes.some(m=>/Respaldo restaurado/.test(m.text||'')), 'el bot confirma la restauración en el chat');
     chk(Array.isArray(s.cats) && s.cats.length>=20, 'la restauración mantiene las categorías');
+
+    console.log('\n12. Comprobante original (foto/PDF) bajo demanda');
+    mock.setArchivo(fs.readFileSync(path.join(__dirname,'fixtures','ticket.pdf')), 'docs/ticket.pdf', 'application/pdf');
+    const conDoc = (await api(base+'/api/estado',{headers:H})).body;
+    const expDoc = conDoc.exps.find(e=>e._doc && e._doc.fileId);
+    chk(!!expDoc, 'el gasto que llegó como archivo conserva el file_id del original (_doc)');
+    if(expDoc){
+      const comp = await api(base+'/api/comprobante/'+expDoc.id, {headers:H});
+      chk(comp.status===200 && /(pdf|octet-stream)/.test(comp.headers.get('content-type')||''),
+          'GET /api/comprobante/:id devuelve el original con su content-type (' + (comp.headers.get('content-type')||'?') + ')');
+    }
+    chk((await api(base+'/api/comprobante/restaurado-tg',{headers:H})).status===404,
+        'un gasto sin archivo asociado responde 404');
+    chk((await api(base+'/api/comprobante/'+(expDoc?expDoc.id:'x'))).status===401,
+        'el comprobante pide sesión igual que todo lo demás');
+    const archsAntes = mock.documentos.length + mock.fotos.length;
+    await enviarUpdate(403, { text:'/comprobante' });
+    await dormir(1500);
+    chk(mock.documentos.length + mock.fotos.length > archsAntes,
+        'el comando /comprobante reenvía el original al chat');
 
     /* Último respaldo al recibir la señal de apagado (Render manda SIGTERM en cada deploy) */
     const docsAntes = mock.documentos.length;

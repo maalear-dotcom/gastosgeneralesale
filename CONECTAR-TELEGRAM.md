@@ -306,12 +306,14 @@ mismo vale para las subcategorías y los límites.
 ## Los comandos del bot
 
 ```
-/total      gastos del mes, por categoría
-/alertas    límites y presupuestos del período
-/ultimos    últimos 5 comprobantes
-/respaldo   manda al chat una copia de seguridad (.json) de todo
-/ayuda      esta lista
-/vincular X vincular este número con la clave X
+/total        gastos del mes, por categoría
+/alertas      límites y presupuestos del período
+/ultimos      últimos 5 comprobantes
+/comprobante  reenvía la foto o PDF original del último gasto
+              (o /comprobante 3 para el tercero)
+/respaldo     manda al chat una copia de seguridad (.json) de todo
+/ayuda        esta lista
+/vincular X   vincular este número con la clave X
 ```
 
 ---

@@ -92,6 +92,10 @@ label.f{display:block;font-size:11.5px;font-weight:600;color:var(--ink-3);text-t
 .tbl tr.subrow td{background:#fbfcff;color:var(--ink-2)}
 .tbl tr.subrow:hover{background:#f6f8ff}
 .tblwrap{overflow-x:auto;border-radius:var(--radius)}
+/* Comprobante original (📎): última columna compacta; en pantalla chica
+   la celda no se parte y la tabla se desliza si algo no entra */
+.c-acts{white-space:nowrap;text-align:right}
+.c-acts .btn{margin-left:4px}
 .catdot{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:8px;flex:0 0 auto}
 .catcell{display:flex;align-items:center;gap:0;font-weight:600}
 .expander{width:22px;height:22px;border-radius:6px;background:#eef1f7;color:var(--ink-3);display:grid;place-items:center;font-size:10px;margin-right:8px;flex:0 0 auto;transition:.14s}
@@ -370,6 +374,7 @@ input.ctl:hover,select.ctl:hover,textarea.ctl:hover{border-color:#cdd5e8}
   .searchwrap{flex:1 1 100%}.searchwrap input{width:100%}
   .c-estado{display:none}                /* la barra de límite ya lo indica */
   .scrim{padding:10px;align-items:flex-end}
+  .c-acts .btn{margin-left:3px;padding:5px 8px}
   .modal{max-width:100%;max-height:92vh;border-radius:16px 16px 0 0;animation:pop .18s ease}
   .mbody{padding:15px 15px calc(18px + env(safe-area-inset-bottom))}
   .mhead{padding:15px 16px}
@@ -1622,7 +1627,7 @@ function renderGastos(){
     <td class="num"><b>${money(e.amount)}</b>${total?`<div class="mini">${pct(e.amount/total*100)}</div>`:''}</td>
     <td class="c-medio">${e.pay?`<span class="pill">${esc(e.pay)}</span>`:'<span class="pill" style="opacity:.55">—</span>'}</td>
     <td class="c-obs" style="max-width:230px"><div class="mini" style="white-space:normal;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(e.notes||'')}</div></td>
-    <td class="num"><button class="btn sm danger" data-del="${e.id}">✕</button></td>
+    <td class="num c-acts">${e._doc && e._doc.fileId && MODO==='remoto'?`<button class="btn sm ghost" data-doc="${e.id}" title="Ver comprobante original" aria-label="Ver comprobante original">📎</button>`:''}<button class="btn sm danger" data-del="${e.id}">✕</button></td>
   </tr>`).join('');
 
   $('#view-gastos').innerHTML=`
@@ -1668,8 +1673,49 @@ function renderGastos(){
   $('#btnBackChart') && ($('#btnBackChart').onclick=()=>{ UI.gastoCat=''; go('dashboard') });
   $('#btnNew').onclick=()=>modalGasto(null);
   $('#btnNew2') && ($('#btnNew2').onclick=()=>modalGasto(null));
-  $$('[data-edit]').forEach(tr=>tr.onclick=ev=>{ if(ev.target.closest('[data-del]')) return; modalGasto(tr.dataset.edit) });
+  $$('[data-edit]').forEach(tr=>tr.onclick=ev=>{ if(ev.target.closest('[data-del],[data-doc]')) return; modalGasto(tr.dataset.edit) });
   $$('[data-del]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();eliminarGasto(b.dataset.del)});
+  $$('[data-doc]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();verComprobante(b.dataset.doc)});
+}
+
+/* Muestra el comprobante original (foto o PDF) que se guardó junto al gasto.
+   El archivo vive en Telegram: el servidor lo baja bajo demanda y acá se ve
+   en un modal — igual en la computadora que en el celular. */
+async function verComprobante(id){
+  const e = S.exps.find(x=>x.id===id);
+  if(!e || !e._doc || !e._doc.fileId) return;
+  openModal(`
+  <div class="mhead"><h3>🧾 Comprobante</h3><button class="x" data-close>✕</button></div>
+  <div class="mbody" style="text-align:center">
+    <div class="mini" style="margin-bottom:11px">${esc(catName(e.cat))} · ${money(e.amount)} · ${fechaCorta(e.date)}</div>
+    <div id="docBox"><div class="mini">Descargando el comprobante…</div></div>
+  </div>
+  <div class="mfoot"><button class="btn" data-close>Cerrar</button></div>`);
+  try{
+    const r = await fetch('/api/comprobante/'+encodeURIComponent(id), { credentials:'same-origin' });
+    if(!r.ok){
+      const j = await r.json().catch(()=>null);
+      throw new Error((j && (j.error==='sin_comprobante' ? 'este gasto no tiene archivo asociado'
+        : j.error==='no_se_pudo_descargar' ? 'Telegram no lo devolvió'
+        : j.error || 'error')) || ('HTTP '+r.status));
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const caja = $('#docBox'); if(!caja) return;
+    if(/^image\//.test(blob.type)){
+      caja.innerHTML = `<img src="${url}" alt="Comprobante" style="max-width:100%;max-height:58vh;border-radius:10px">
+        <div style="margin-top:11px"><a class="btn sm" href="${url}" download="${esc(e._doc.nombre||'comprobante')}">⬇ Descargar</a></div>`;
+    }else if(/pdf/.test(blob.type)){
+      caja.innerHTML = `<iframe src="${url}" title="Comprobante" style="width:100%;height:58vh;border:0;border-radius:10px;background:var(--panel-2)"></iframe>
+        <div style="margin-top:11px"><a class="btn sm" href="${url}" download="${esc(e._doc.nombre||'comprobante')}">⬇ Descargar</a></div>`;
+    }else{
+      caja.innerHTML = `<a class="btn sm" href="${url}" download="${esc(e._doc.nombre||'comprobante')}">⬇ Descargar el archivo</a>`;
+    }
+  }catch(err){
+    const caja = $('#docBox');
+    if(caja) caja.innerHTML = `<div class="alert bad" style="text-align:left"><div class="ai">⚠️</div>
+      <div class="atx">No pude bajar el comprobante: <b>${esc(err.message||String(err))}</b></div></div>`;
+  }
 }
 
 function modalGasto(id){
@@ -1692,6 +1738,7 @@ function modalGasto(id){
       <div class="field"><label class="f">Comercio</label><input class="ctl" id="gMer" value="${esc(d.merchant)}" placeholder="Ej: Coto" style="width:100%"></div>
     </div>
     <div class="field" style="margin-bottom:0"><label class="f">Observación</label><textarea class="ctl" id="gNotes" rows="3" placeholder="Notas, cuotas, quién pagó…">${esc(d.notes)}</textarea></div>
+    ${e && e._doc && e._doc.fileId && MODO==='remoto' ? `<div style="margin-top:12px"><button class="btn sm" type="button" id="gDoc" style="width:100%">📎 Ver comprobante original</button></div>` : ''}
   </div>
   <div class="mfoot">
     ${e?`<button class="btn danger" id="gDel" style="margin-right:auto">🗑 Eliminar</button>`:''}
@@ -1701,6 +1748,7 @@ function modalGasto(id){
 
   const fillSubs=()=>{ $('#gSub').innerHTML='<option value="">—</option>'+opcionesSubs($('#gCat').value, d.sub); };
   $('#gCat').onchange=fillSubs; fillSubs();
+  $('#gDoc') && ($('#gDoc').onclick=()=>{ closeModal(); verComprobante(e.id); });
 
   $('#gSave').onclick=()=>{
     const amt=parseFloat(String($('#gAmt').value).replace(',','.'));
@@ -2248,12 +2296,15 @@ function renderImportar(){
 }
 
 /* Persiste los gastos analizados y devuelve los registros guardados.
-   Es la misma rutina que usa el servidor cuando llega un comprobante desde el celular. */
-function persistirDrafts(drafts){
+   Es la misma rutina que usa el servidor cuando llega un comprobante desde el celular.
+   `doc` (opcional) guarda el archivo original que está en Telegram (file_id),
+   para poder volver a mostrarlo o descargarlo desde la app. */
+function persistirDrafts(drafts, doc){
   const guardados=[];
   (drafts||[]).filter(x=>x._st==='nuevo' && x.amount>0 && x.cat).forEach(x=>{
     const rec={ id:uid(), date:x.date||hoyISO(), cat:x.cat, _catn:(catById(x.cat)||{}).name||'', sub:x.sub||null, detail:x.detail||'Gasto',
       amount:x.amount, pay:x.pay||'', merchant:x.merchant||'', notes:x.notes||'', src:x.src||'texto', _ts:Date.now() };
+    if(doc && doc.fileId) rec._doc={ fileId:doc.fileId, mime:doc.mime||'', nombre:doc.nombre||'comprobante' };
     S.exps.push(rec); guardados.push(rec);
   });
   if(guardados.length) save();

@@ -106,7 +106,7 @@ async function respaldarPorTelegram(motivo){
       String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0') + '.json';
     const pie = `💾 Respaldo (${motivo}) · ${(s.exps||[]).length} gasto${(s.exps||[]).length===1?'':'s'} · ${motor.api.money(monto)}\n` +
       'Si algún día faltan los datos, reenviame este archivo al bot y lo restauro.';
-    const ok = await enviarDocumento(chat, buf, nombre, pie);
+    const ok = await enviarArchivo(chat, buf, { mime:'application/json', nombre, pie });
     if(ok){
       const st = estado(); st._respaldoTs = Date.now();
       motor.api.setEstado(st); motor.api.guardar(); motor.flush();
@@ -116,17 +116,20 @@ async function respaldarPorTelegram(motivo){
   }finally{ _respaldoEnCurso = false; }
 }
 
-async function enviarDocumento(chatId, buf, nombre, pie){
+async function enviarArchivo(chatId, buf, opcs){
+  const { mime='', nombre='archivo', pie='' } = opcs || {};
+  const esImagen = /^image\//.test(mime||'');
   const fd = new FormData();
   fd.append('chat_id', String(chatId));
-  fd.append('document', new Blob([buf], { type:'application/json' }), nombre);
+  fd.append(esImagen ? 'photo' : 'document',
+            new Blob([buf], { type: mime || 'application/octet-stream' }), nombre);
   if(pie) fd.append('caption', pie);
-  const r = await fetch(API_BASE + '/bot' + TOKEN + '/sendDocument', {
+  const r = await fetch(API_BASE + '/bot' + TOKEN + '/' + (esImagen ? 'sendPhoto' : 'sendDocument'), {
     method:'POST', body: fd, signal: AbortSignal.timeout(20000)
   });
   let j = {};
   try{ j = await r.json(); }catch(e){}
-  if(!j.ok) console.error('[respaldo] sendDocument falló:', j.description || ('HTTP ' + r.status));
+  if(!j.ok) console.error('[telegram] enviarArchivo falló:', j.description || ('HTTP ' + r.status));
   return !!j.ok;
 }
 
@@ -224,6 +227,25 @@ app.get('/api/backup', requiereAuth, (req,res)=>{
   res.setHeader('Content-Disposition','attachment; filename="gastos-generales-'+motor.api.hoyISO()+'.json"');
   res.json(estado());
 });
+
+/* ---- comprobante original: la foto/PDF vive en Telegram y se baja bajo demanda ---- */
+app.get('/api/comprobante/:id', requiereAuth, async (req,res)=>{
+  const e = (estado().exps||[]).find(x=>x.id===req.params.id);
+  if(!e || !e._doc || !e._doc.fileId) return res.status(404).json({ error:'sin_comprobante' });
+  if(!TOKEN) return res.status(503).json({ error:'sin_bot' });
+  try{
+    const buf = await descargar(e._doc.fileId);
+    const mime = e._doc.mime || 'application/octet-stream';
+    const nombre = String(e._doc.nombre||'comprobante').replace(/["\\]/g,'_');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', 'inline; filename="'+nombre+'"');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return res.send(buf);
+  }catch(err){
+    console.error('[comprobante] no se pudo descargar:', err.message || err);
+    return res.status(502).json({ error:'no_se_pudo_descargar' });
+  }
+});
 app.post('/api/restore', requiereAuth, (req,res)=>{
   const b = req.body;
   if(!b || !Array.isArray(b.cats) || !Array.isArray(b.exps)) return res.status(400).json({error:'archivo_invalido'});
@@ -301,6 +323,7 @@ function ayuda(){
     `<b>/total</b> — gastos del mes\n` +
     `<b>/alertas</b> — límites y presupuestos\n` +
     `<b>/ultimos</b> — últimos comprobantes\n` +
+    `<b>/comprobante [n]</b> — reenviar el original (foto/PDF) del n-ésimo gasto\n` +
     `<b>/respaldo</b> — mandar una copia de seguridad (.json)\n` +
     `<b>/ayuda</b> — esta lista\n` +
     `<b>/vincular &lt;clave&gt;</b> — vincular este número`;
@@ -346,6 +369,25 @@ async function comando(chatId, texto){
       ? '✅ Te mandé el archivo de respaldo arriba ⬆️. Guardalo en un lugar seguro (Drive, correo, etc.).'
       : '❌ No pude generar el respaldo: hace falta TELEGRAM_BOT_TOKEN y un chat vinculado.');
   }
+  if(c === '/comprobante' || c === '/comprobantes'){
+    const lista = estado().exps.filter(e=>e && e._doc && e._doc.fileId)
+      .sort((a,b)=>(b.date||'').localeCompare(a.date||'') || (b._ts||0)-(a._ts||0));
+    if(!lista.length) return enviar(chatId,
+      'Todavía no hay comprobantes originales guardados. A partir de ahora, cada foto o PDF que me mandes queda archivado con el gasto.');
+    const arg = parseInt(texto.split(/\s+/)[1], 10);
+    const n = (isNaN(arg) || arg < 1) ? 1 : Math.min(arg, lista.length);
+    const g = lista[n-1];
+    try{
+      const buf = await descargar(g._doc.fileId);
+      const pie = `🧾 ${motor.api.money(g.amount)} · ${motor.api.catName(g.cat)} · ${motor.api.fechaCorta(g.date)}\n` +
+        `comprobante ${n} de ${lista.length} guardados`;
+      const ok = await enviarArchivo(chatId, buf, { mime:g._doc.mime, nombre:g._doc.nombre||'comprobante', pie });
+      if(!ok) return enviar(chatId, '❌ No pude reenviar el archivo a Telegram.');
+      return;
+    }catch(err){
+      return enviar(chatId, '❌ No pude bajar el comprobante: ' + motor.api.esc(err.message||String(err)));
+    }
+  }
   if(c === '/total' || c === '/mes') return enviar(chatId, resumenTotal());
   if(c === '/alertas') return enviar(chatId, textoAlertas(motor.api.rangoMes(motor.api.hoyISO().slice(0,7))[0]));
   if(c === '/ultimos' || c === '/ultimo'){
@@ -385,10 +427,11 @@ async function pdfATexto(buffer){
   return (r && r.text) || '';
 }
 
-/* Guarda los gastos analizados y contesta al celular */
-async function guardarYResponder(chatId, fuente, origen){
+/* Guarda los gastos analizados y contesta al celular.
+   `doc` (opcional): el archivo original recibido, para archivarlo con el gasto. */
+async function guardarYResponder(chatId, fuente, origen, doc){
   const { drafts, saltados } = motor.api.analizarTexto(fuente, origen);
-  const guardados = motor.api.persistirDrafts(drafts);
+  const guardados = motor.api.persistirDrafts(drafts, doc);
   tocar();
 
   const lineas = [];
@@ -426,11 +469,13 @@ async function procesar(u){
   if(texto.startsWith('/')) return comando(chatId, texto);
   if(!chatAutorizado(chatId)) return enviar(chatId, mensajeVinculacion(chatId));
 
-  let extra = '', origen = 'texto', aviso = '';
+  let extra = '', origen = 'texto', aviso = '', doc = null;
   try{
     if(msg.photo && msg.photo.length){
       origen = 'foto'; aviso = '📷 Leyendo el comprobante…';
-      const buf = await descargar(msg.photo[msg.photo.length - 1].file_id);
+      const p = msg.photo[msg.photo.length - 1];
+      doc = { fileId:p.file_id, mime:'image/jpeg', nombre:'comprobante-'+motor.api.hoyISO()+'.jpg' };
+      const buf = await descargar(p.file_id);
       extra = motor.api.normalizarOCR(await ocr(buf));
     }else if(msg.document){
       const d = msg.document;
@@ -452,12 +497,15 @@ async function procesar(u){
       const esImg = /^image\//.test(d.mime_type || '') || /\.(png|jpe?g|webp)$/i.test(d.file_name || '');
       if(esPdf){
         origen = 'pdf'; aviso = '📄 Leyendo el PDF…';
+        doc = { fileId:d.file_id, mime:'application/pdf', nombre:d.file_name||('comprobante-'+motor.api.hoyISO()+'.pdf') };
         const t = await pdfATexto(await descargar(d.file_id));
         if(t.replace(/\s/g,'').length < 30)
           return enviar(chatId,'Ese PDF no tiene texto seleccionable 📄. Mandame una <b>foto</b> del comprobante y lo leo con OCR.');
         extra = motor.api.normalizarOCR(t);
       }else if(esImg){
         origen = 'foto'; aviso = '📷 Leyendo el comprobante…';
+        doc = { fileId:d.file_id, mime:/^image\//.test(d.mime_type||'') ? d.mime_type : 'image/jpeg',
+                nombre:d.file_name||('comprobante-'+motor.api.hoyISO()+'.jpg') };
         extra = motor.api.normalizarOCR(await ocr(await descargar(d.file_id)));
       }else{
         return enviar(chatId,'Solo puedo recibir <b>texto, fotos y PDF</b>.');
@@ -471,7 +519,7 @@ async function procesar(u){
   const fuente = [texto, extra].filter(Boolean).join('\n');
   if(!fuente) return enviar(chatId,'Mandame el comprobante como <b>texto</b>, <b>foto</b> o <b>PDF</b>.');
   if(aviso) await enviar(chatId, aviso);
-  await guardarYResponder(chatId, fuente, origen);
+  await guardarYResponder(chatId, fuente, origen, doc);
 }
 
 /* ---- webhook (nube) ---- */

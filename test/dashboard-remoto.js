@@ -267,6 +267,30 @@ async function main(){
   chk(filaG && /\$/.test(filaG.querySelectorAll('td')[3].textContent) && /%/.test(filaG.querySelectorAll('td')[3].textContent),
       'cada gasto de la lista muestra el importe y su % del total');
 
+  console.log('\n8b. Botón de comprobante (📎) sin romper la tabla ni el celular');
+  /* La tabla ordena por fecha descendente: el _doc va en todos para mirar
+     la primera fila sin depender del orden. */
+  w.eval("S.exps.forEach(x=>x._doc = { fileId:'f1', mime:'image/jpeg', nombre:'foto.jpg' }); render();");
+  await dormir(60);
+  const filaDoc = w.document.querySelector('#view-gastos tbody tr');
+  chk(filaDoc && filaDoc.querySelector('button[data-doc]') !== null, 'el gasto con archivo muestra el botón 📎');
+  const celdaActs = filaDoc && filaDoc.querySelector('td.c-acts');
+  chk(celdaActs && celdaActs.querySelectorAll('.btn').length === 2, '📎 y ✕ comparten la última celda compacta');
+  chk(celdaActs && celdaActs.querySelector('[data-del]') !== null, 'el ✕ de borrar sigue ahí');
+  chk(/\.c-acts\{white-space:nowrap/.test(css), 'la celda de acciones no se parte en dos renglones');
+  chk(/\.c-acts \.btn\{margin-left:4px\}/.test(css), 'los dos botones quedan separados sin tocarse');
+  chk(/\.tblwrap\{overflow-x:auto/.test(css), 'si algo no entra en el celular, la tabla se desliza en horizontal');
+  chk(!/c-acts/.test(mq860), 'la columna de acciones NO se oculta en pantalla chica');
+  w.eval("modalGasto(S.exps[0].id)");
+  await dormir(60);
+  chk(w.document.getElementById('gDoc') !== null, 'la ficha del gasto ofrece "📎 Ver comprobante original"');
+  w.eval("closeModal()");
+  w.eval("S.exps.forEach(x=>delete x._doc); render();");
+  await dormir(60);
+  chk(w.document.querySelector('#view-gastos button[data-doc]') === null,
+      'sin archivo asociado no aparece el botón (la tabla queda como antes)');
+  chk(w.eval("typeof verComprobante") === 'function', 'la función del visor existe');
+
   w.eval("document.getElementById('mmenu').click()");
   chk(w.document.getElementById('sidebar').classList.contains('open'), 'el botón ☰ abre el menú');
   chk(w.document.getElementById('navscrim').classList.contains('on'), 'muestra el fondo detrás del menú');
