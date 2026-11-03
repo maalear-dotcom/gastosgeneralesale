@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/run.js && node test/escenario-huerfanos.js && node test/dashboard-remoto.js"
+    "test": "node test/run.js && node test/escenario-huerfanos.js && node test/categorias-editadas.js && node test/dashboard-remoto.js"
   },
   "engines": {
     "node": ">=18"

@@ -314,6 +314,26 @@ async function main(){
   chk(!w.document.getElementById('sidebar').classList.contains('open'), 'al pasar a escritorio se cierra el menú solo');
   chk(!w.document.getElementById('navscrim').classList.contains('on'), 'y el fondo oscuro desaparece');
 
+  console.log('\n9. Renombrar una categoría desde la interfaz (S1 + S3)');
+  w.eval("go('categorias');");
+  await dormir(60);
+  const supId = w.eval("S.cats.find(c=>c.name==='Supermercado').id");
+  const inpNombre = w.document.querySelector('input[data-cname="' + supId + '"]');
+  chk(inpNombre !== null, 'la vista de categorías muestra el campo de nombre');
+  if(inpNombre){
+    inpNombre.value = 'Mercado';
+    inpNombre.dispatchEvent(new w.Event('change', { bubbles:true }));
+    await dormir(60);
+    chk(w.eval("S.cats.find(c=>c.id==='" + supId + "').name") === 'Mercado', 'el renombre se guarda');
+    chk(w.eval("S._catEdits['" + supId + "'] && S._catEdits['" + supId + "']._cat.name") === 'Mercado',
+        'la edición queda registrada en _catEdits para sobrevivir a un deploy (S1)');
+    chk(w.eval("S.exps.filter(e=>e.cat==='" + supId + "').length") > 0 &&
+        w.eval("S.exps.filter(e=>e.cat==='" + supId + "').every(e=>e._catn==='Mercado')"),
+        'los gastos de la categoría actualizan el nombre que guardan (_catn, S3)');
+    chk(w.eval("JSON.parse(localStorage.getItem('gastosGenerales.v1'))._catEdits['" + supId + "']._cat.name") === 'Mercado',
+        'la edición se persiste junto con el resto del estado');
+  }
+
   console.log(`\nRESULTADO: ${ok} ok, ${mal} fallos\n`);
   process.exit(mal ? 1 : 0);
 }

@@ -661,7 +661,7 @@ let MODO='local';
 let _syncT=null, _syncErr=false;
 
 function defaults(){
-  return { v:1, cats:seedCategorias(), exps:[], cfg:{ warnPct:80, moneda:'ARS' }, _borrados:[] };
+  return { v:1, cats:seedCategorias(), exps:[], cfg:{ warnPct:80, moneda:'ARS' }, _borrados:[], _catEdits:{} };
 }
 function normalizar(o){
   const s = (o && typeof o==='object' && !Array.isArray(o)) ? o : {};
@@ -670,8 +670,130 @@ function normalizar(o){
   if(!s.cfg || typeof s.cfg!=='object') s.cfg = {warnPct:80, moneda:'ARS'};
   if(!Array.isArray(s._borrados)) s._borrados = [];
   if(!s.v) s.v = 1;
+  if(!s._catEdits || typeof s._catEdits!=='object' || Array.isArray(s._catEdits)) s._catEdits = {};
+  /* Primero reaplico las ediciones de categorías (S1) y después reparo los
+     gastos: así una categoría recreada vuelve a recibir los suyos. */
+  aplicarEdits(s);
   repararCategorias(s);
   return s;
+}
+
+/* =========================================================
+   2b. EDICIONES DE CATEGORÍAS QUE SOBREVIVEN A UN RESEED
+   ---------------------------------------------------------
+   S1 · Todo lo que se cambia en una categoría (nombre, ícono,
+   color, límite, alertas, palabras clave, subcategorías) queda
+   guardado en S._catEdits con su fecha (_upd) y una copia
+   completa. Si el servidor pierde el disco y vuelve a crear la
+   semilla original —o si sincroniza con otro dispositivo— la
+   última edición se reaplica por ID: "Alquiler" renombrada a
+   "Casa" sigue siendo "Casa" después de un deploy.
+   S2 · fusionarCats/fusionarEdits mezclan dos estados por ID y
+   gana siempre la edición más reciente (_upd), en lugar de que
+   imponga siempre el lado que sube o baja el estado.
+   S3 · registrarEdicion mantiene al día e._catn (el nombre de
+   la categoría que tiene cada gasto), que es con lo que se lo
+   vuelve a ubicar si el ID desaparece. */
+function snapshotCat(c){ return JSON.parse(JSON.stringify(c)); }
+
+function registrarEdicion(c){
+  if(!c || !c.id || !S) return;
+  c._upd = Date.now();
+  if(!S._catEdits || typeof S._catEdits!=='object') S._catEdits = {};
+  const previo = S._catEdits[c.id] && S._catEdits[c.id]._cat;
+  S._catEdits[c.id] = { _upd:c._upd, _cat:snapshotCat(c) };
+  if(!previo || previo.name !== c.name){
+    const nombre = c.name;
+    (S.exps||[]).forEach(e=>{ if(e && e.cat===c.id) e._catn = nombre; });
+  }
+}
+function registrarBorrado(id){
+  if(!id || !S) return;
+  if(!S._catEdits || typeof S._catEdits!=='object') S._catEdits = {};
+  S._catEdits[id] = { _upd:Date.now(), _borrada:true };
+}
+/* Reaplica las ediciones guardadas sobre la lista de categorías que se está
+   cargando. Nunca pisa algo más nuevo: si la categoría ya tiene un _upd
+   posterior, la edición vieja se descarta (queda la categoría tal cual está). */
+function aplicarEdits(s){
+  const ed = s._catEdits;
+  if(!ed || typeof ed!=='object' || !Array.isArray(s.cats)) return;
+  const porId = new Map(s.cats.map(c=>[c.id,c]));
+  for(const id in ed){
+    const e = ed[id];
+    if(!e || typeof e!=='object') continue;
+    const c = porId.get(id);
+    if(e._borrada){
+      if(c && (c._upd||0) > (e._upd||0)) delete ed[id];        /* se volvió a crear después */
+      else if(c){
+        /* La categoría se borró: si algún gasto todavía apunta a ella (estado
+           llegado de otro dispositivo), pasa a "Otros", igual que al eliminarla. */
+        if(Array.isArray(s.exps) && s.exps.length){
+          const otros = s.cats.find(x=>norm(x.name)==='otros');
+          if(otros) s.exps.forEach(x=>{ if(x && x.cat===id){ x.cat=otros.id; x.sub=null; x._catn=otros.name; } });
+        }
+        s.cats = s.cats.filter(x=>x.id!==id); porId.delete(id);
+      }
+      continue;
+    }
+    if(!e._cat) continue;
+    if(!c){
+      /* La categoría no está (semilla recién creada): la recreo con lo que el
+         usuario había hecho. Si ya hay otra con el mismo nombre, no duplico. */
+      if(s.cats.some(x=>norm(x.name)===norm(e._cat.name))) continue;
+      const nueva = snapshotCat(e._cat);
+      s.cats.push(nueva); porId.set(id, nueva);
+      continue;
+    }
+    if((c._upd||0) > (e._upd||0)){ delete ed[id]; continue; }    /* hay una edición más nueva */
+    if((c._upd||0) < (e._upd||0)){
+      const nueva = snapshotCat(e._cat);
+      const i = s.cats.indexOf(c);
+      if(i >= 0) s.cats[i] = nueva;
+      porId.set(id, nueva);
+    }
+  }
+}
+/* Une dos listas de categorías por ID. Gana la edición más reciente (_upd); las
+   que sólo existen de un lado se agregan; y un ID desconocido con el mismo
+   nombre que una existente se trata como la misma categoría (se devuelve el
+   mapeo en `alias` para reubicar los gastos que lo usen). */
+function fusionarCats(base, otra, alias){
+  if(!Array.isArray(base)) base = [];
+  if(!Array.isArray(otra) || !otra.length) return base.slice();
+  const out = base.slice();
+  const porId = new Map(out.map(c=>[c.id,c]));
+  const porNombre = new Map(out.map(c=>[norm(c.name), c.id]));
+  otra.forEach(c=>{
+    if(!c || !c.id) return;
+    const actual = porId.get(c.id);
+    if(actual){
+      if((c._upd||0) > (actual._upd||0)){
+        const i = out.indexOf(actual);
+        if(i >= 0) out[i] = c;
+        porId.set(c.id, c);
+        porNombre.delete(norm(actual.name));
+        porNombre.set(norm(c.name), c.id);
+      }
+      return;
+    }
+    const propio = porNombre.get(norm(c.name));
+    if(propio){ if(alias) alias.set(c.id, propio); return; }
+    out.push(c); porId.set(c.id, c); porNombre.set(norm(c.name), c.id);
+  });
+  return out;
+}
+/* Une dos mapas de ediciones (_catEdits): gana la más reciente (_upd). */
+function fusionarEdits(a, b){
+  const out = (b && typeof b==='object' && !Array.isArray(b)) ? Object.assign({}, b) : {};
+  if(a && typeof a==='object' && !Array.isArray(a)){
+    for(const k in a){
+      const ea = a[k], eb = out[k];
+      if(!ea || typeof ea!=='object') continue;
+      if(!eb || typeof eb!=='object' || (ea._upd||0) >= (eb._upd||0)) out[k] = ea;
+    }
+  }
+  return out;
 }
 
 /* Los gastos cuya categoría ya no existe (IDs generados al azar en versiones
@@ -779,9 +901,19 @@ async function conectarServidor(){
     /* Fusiono la caché de este navegador con el estado del servidor:
        - si el servidor quedó vacío (reinicio/deploy sin datos), subo la caché entera;
        - si no, agrego los gastos que sólo existen acá — respetando lo que se borró
-         en cualquiera de los dos lados — y las categorías propias, sin duplicar
-         categorías que ya existan con el mismo nombre. */
+         en cualquiera de los dos lados — y las categorías, que se fusionan por ID
+         con la edición más reciente (_upd): así un renombre hecho en este
+         navegador no lo pisa el servidor recién redeployeado, ni al revés. */
     let cache=null; try{ cache=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
+    const cacheCats=(cache && Array.isArray(cache.cats) && cache.cats.length) ? cache.cats : null;
+    const alias=new Map();                 /* mismo nombre, ID distinto → ID del servidor */
+    let tocoCats=false;
+    if(cacheCats){
+      const antes=JSON.stringify(S.cats)+'|'+JSON.stringify(S._catEdits||null);
+      S.cats=fusionarCats(S.cats, cacheCats, alias);
+      S._catEdits=fusionarEdits(cache._catEdits, S._catEdits);
+      tocoCats = antes !== JSON.stringify(S.cats)+'|'+JSON.stringify(S._catEdits||null);
+    }
     if(cache && Array.isArray(cache.exps) && cache.exps.length){
       const borrados=new Map();
       (S._borrados||[]).concat(cache._borrados||[]).forEach(b=>{
@@ -790,23 +922,24 @@ async function conectarServidor(){
       const ids=new Set(S.exps.map(e=>e.id));
       const extras=cache.exps.filter(e=>e && e.id && !ids.has(e.id) && !borrados.has(e.id));
       if(!S.exps.length && extras.length){
-        S=normalizar(cache); sincronizar(true);
-      }else if(extras.length){
-        const catIds=new Set(S.cats.map(c=>c.id));
-        const catPorNombre=new Map(S.cats.map(c=>[norm(c.name), c.id]));
-        const alias=new Map();                 /* mismo nombre, ID distinto → ID del servidor */
-        (cache.cats||[]).forEach(c=>{
-          if(!c || !c.id || catIds.has(c.id)) return;
-          const propio=catPorNombre.get(norm(c.name));
-          if(propio) alias.set(c.id, propio);
-          else{ S.cats.push(c); catIds.add(c.id); catPorNombre.set(norm(c.name), c.id); }
-        });
-        extras.forEach(e=>{ const a=alias.get(e.cat); if(a) e.cat=a; });
-        S.exps=S.exps.filter(e=>e && !borrados.has(e.id)).concat(extras);
+        /* el servidor no tiene gastos: subo la caché entera, pero con las
+           categorías y ediciones ya fusionadas de arriba */
+        const cats=S.cats, edits=S._catEdits, rev=S._rev;
+        S=normalizar(cache);
+        S.cats=cats; S._catEdits=edits; S._rev=rev;
+        if(alias.size) S.exps.forEach(e=>{ const a=alias.get(e.cat); if(a) e.cat=a; });
         S._borrados=[...borrados].map(([id,ts])=>({id, ts}));
         S=normalizar(S); sincronizar(true);
+      }else if(extras.length || tocoCats){
+        if(extras.length){
+          extras.forEach(e=>{ const a=alias.get(e.cat); if(a) e.cat=a; });
+          S.exps=S.exps.filter(e=>e && !borrados.has(e.id)).concat(extras);
+          S._borrados=[...borrados].map(([id,ts])=>({id, ts}));
+        }
+        S=normalizar(S); sincronizar(true);
       }else save();
-    }else save();
+    }else if(tocoCats){ S=normalizar(S); sincronizar(true); }
+    else save();
     return 'remoto';
   }catch(e){ return 'local'; }
 }
@@ -1984,25 +2117,39 @@ function renderCategorias(){
   $('#btnReset').onclick=()=>confirmar('Restaurar categorías originales',
     'Se reemplaza la lista actual por las 20 categorías originales. <b>Los gastos cargados se conservan</b>: los de categorías eliminadas pasarán a <b>Otros</b>.', ()=>{
       const antes=S.cats; const nuevas=seedCategorias(); const otros=nuevas.find(c=>norm(c.name)==='otros');
-      const map={}; antes.forEach(c=>{ const misma=nuevas.find(n2=>norm(n2.name)===norm(c.name)); map[c.id]=misma?misma.id:(otros?otros.id:null); });
+      /* Las categorías se emparejan primero por ID (así los gastos de una categoría
+         renombrada, p. ej. "Casa", siguen en su lugar) y sólo después por nombre. */
+      const map={}; antes.forEach(c=>{ const misma=nuevas.find(n2=>n2.id===c.id)||nuevas.find(n2=>norm(n2.name)===norm(c.name)); map[c.id]=misma?misma.id:(otros?otros.id:null); });
+      /* La restauración queda registrada como edición vigente (S1): si no, un
+         deploy posterior volvería a imponer los nombres propios que había. */
+      const ts=Date.now();
+      if(!S._catEdits || typeof S._catEdits!=='object') S._catEdits={};
+      nuevas.forEach(n2=>{ n2._upd=ts; S._catEdits[n2.id]={_upd:ts, _cat:snapshotCat(n2)}; });
+      antes.forEach(c=>{ if(!nuevas.some(n2=>n2.id===c.id)) S._catEdits[c.id]={_upd:ts, _borrada:true}; });
       S.cats=nuevas;
-      S.exps.forEach(e2=>{ e2.cat=map[e2.cat]|| (otros?otros.id:null); e2.sub=null; });
+      S.exps.forEach(e2=>{
+        e2.cat=map[e2.cat]|| (otros?otros.id:null); e2.sub=null;
+        const n2=nuevas.find(x=>x.id===e2.cat);
+        if(n2) e2._catn=n2.name;                        /* S3: el nombre sigue al cambio */
+      });
       invalidarReglas(); save(); render(); toast('Categorías restauradas.');
     });
 
   $$('[data-cexp]').forEach(b=>b.onclick=()=>{UI.catOpen[b.dataset.cexp]=!UI.catOpen[b.dataset.cexp];render()});
-  $$('[data-cname]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.cname); if(!c)return; const v=i.value.trim(); if(!v){i.value=c.name;return;} c.name=v; invalidarReglas(); save(); render(); toast('Nombre actualizado.')});
-  $$('[data-cicon]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.cicon); c.icon=i.value.trim()||'🏷️'; save(); render()});
-  $$('[data-ccol2]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.ccol2); c.color=i.value; save(); render()});
-  $$('[data-ckw]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.ckw); c.kw=i.value.split(',').map(s=>s.trim()).filter(Boolean); invalidarReglas(); save(); toast('Palabras clave de categoría guardadas.')});
-  $$('[data-ctoggle]').forEach(b=>b.onclick=()=>{const c=catById(b.dataset.ctoggle); c.alert=!c.alert; save(); render(); toast(c.alert?`Alertas activadas para ${esc(c.name)}.`:`Alertas silenciadas para ${esc(c.name)}.`)});
+  /* S1+S3: registrarEdicion() guarda la edición para que sobreviva a un deploy
+     y, si cambió el nombre, actualiza _catn en los gastos de la categoría. */
+  $$('[data-cname]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.cname); if(!c)return; const v=i.value.trim(); if(!v){i.value=c.name;return;} c.name=v; registrarEdicion(c); invalidarReglas(); save(); render(); toast('Nombre actualizado.')});
+  $$('[data-cicon]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.cicon); c.icon=i.value.trim()||'🏷️'; registrarEdicion(c); save(); render()});
+  $$('[data-ccol2]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.ccol2); c.color=i.value; registrarEdicion(c); save(); render()});
+  $$('[data-ckw]').forEach(i=>i.onchange=()=>{const c=catById(i.dataset.ckw); c.kw=i.value.split(',').map(s=>s.trim()).filter(Boolean); registrarEdicion(c); invalidarReglas(); save(); toast('Palabras clave de categoría guardadas.')});
+  $$('[data-ctoggle]').forEach(b=>b.onclick=()=>{const c=catById(b.dataset.ctoggle); c.alert=!c.alert; registrarEdicion(c); save(); render(); toast(c.alert?`Alertas activadas para ${esc(c.name)}.`:`Alertas silenciadas para ${esc(c.name)}.`)});
   $$('[data-climit]').forEach(b=>b.onclick=()=>modalLimite(b.dataset.climit));
   $$('[data-cdel]').forEach(b=>b.onclick=()=>modalEliminarCat(b.dataset.cdel));
   $$('[data-sadd]').forEach(b=>b.onclick=()=>modalSub(b.dataset.sadd,null));
   $$('[data-sshop]').forEach(el=>el.onclick=ev=>{ if(ev.target.closest('[data-sdel]'))return; const [c,s]=el.dataset.sshop.split('|'); modalSub(c,s); });
   $$('[data-sdel]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const [c,s]=b.dataset.sdel.split('|');const cat=catById(c);if(!cat)return;
     confirmar('Eliminar subcategoría', `Se elimina <b>${esc(subName(c,s))}</b> de ${esc(cat.name)}. Los gastos existentes la mantienen guardada.`, ()=>{
-      cat.subs=cat.subs.filter(x=>x.id!==s); invalidarReglas(); save(); render(); toast('Subcategoría eliminada.'); }); });
+      cat.subs=cat.subs.filter(x=>x.id!==s); registrarEdicion(cat); invalidarReglas(); save(); render(); toast('Subcategoría eliminada.'); }); });
 }
 
 function modalNuevaCat(){
@@ -2024,9 +2171,10 @@ function modalNuevaCat(){
   $('#ncSave').onclick=()=>{
     const name=$('#ncName').value.trim(); if(!name){toast('Ingresá un nombre.','warn');return;}
     if(S.cats.some(c=>norm(c.name)===norm(name))){toast('Ya existe una categoría con ese nombre.','warn');return;}
-    S.cats.push({id:uid(),name,icon:$('#ncIcon').value.trim()||'🏷️',color:$('#ncColor').value,limit:Math.max(0,+$('#ncLimit').value||0),alert:true,
+    const nueva={id:uid(),name,icon:$('#ncIcon').value.trim()||'🏷️',color:$('#ncColor').value,limit:Math.max(0,+$('#ncLimit').value||0),alert:true,
       kw:$('#ncKw').value.split(',').map(s=>s.trim()).filter(Boolean),
-      subs:$('#ncSubs').value.split(',').map(s=>s.trim()).filter(Boolean).map(n=>({id:uid(),name:n,kw:[n],ctx:null}))});
+      subs:$('#ncSubs').value.split(',').map(s=>s.trim()).filter(Boolean).map(n=>({id:uid(),name:n,kw:[n],ctx:null}))};
+    S.cats.push(nueva); registrarEdicion(nueva);
     invalidarReglas(); save(); closeModal(); render(); toast(`Categoría “${esc(name)}” creada.`);
   };
 }
@@ -2048,9 +2196,9 @@ function modalSub(catId, subId){
     const n=$('#sName').value.trim(); if(!n){toast('Ingresá un nombre.','warn');return;}
     const kws=$('#sKw').value.split(',').map(x=>x.trim()).filter(Boolean);
     if(s){ s.name=n; s.kw=kws; } else { c.subs.push({id:uid(),name:n,kw:kws,ctx:null}); }
-    invalidarReglas(); save(); closeModal(); render(); toast('Subcategoría guardada.');
+    registrarEdicion(c); invalidarReglas(); save(); closeModal(); render(); toast('Subcategoría guardada.');
   };
-  $('#sDel') && ($('#sDel').onclick=()=>{ c.subs=c.subs.filter(x=>x.id!==subId); invalidarReglas(); save(); closeModal(); render(); toast('Subcategoría eliminada.'); });
+  $('#sDel') && ($('#sDel').onclick=()=>{ c.subs=c.subs.filter(x=>x.id!==subId); registrarEdicion(c); invalidarReglas(); save(); closeModal(); render(); toast('Subcategoría eliminada.'); });
 }
 
 function modalLimite(catId){
@@ -2103,7 +2251,7 @@ function modalLimite(catId){
     c.limit=Math.max(0, Math.round(+$('#lmVal').value||0));
     c.alert=alertaTmp; S.cfg.warnPct=warnTmp;
     c.kw=$('#lmKw').value.split(',').map(s=>s.trim()).filter(Boolean);
-    invalidarReglas(); save(); closeModal(); render();
+    registrarEdicion(c); invalidarReglas(); save(); closeModal(); render();
     const tot=consumoCat(c, rangoMes(UI.mes)[0]); const e=estadoLimite(c,tot);
     if(!c.limit) toast(`Se quitó el límite de ${esc(c.name)}.`,'ok');
     else if(e.level==='bad') toast(`Límite superado: <b>${esc(c.name)}</b> lleva ${money(tot)} sobre un límite de ${money(e.lim)}.`,'bad',7000);
@@ -2133,9 +2281,10 @@ function modalEliminarCat(catId){
       const d=$('#delDest').value;
       if(d==='cancel'){closeModal();return;}
       if(d==='borrar') borrarGastos(S.exps.filter(e=>e.cat===catId).map(e=>e.id));
-      else S.exps.forEach(e=>{ if(e.cat===catId){ e.cat=otros.id; e.sub=null; } });
+      else S.exps.forEach(e=>{ if(e.cat===catId){ e.cat=otros.id; e.sub=null; e._catn=otros.name; } });
     }
     S.cats=S.cats.filter(x=>x.id!==catId);
+    registrarBorrado(catId);
     invalidarReglas(); save(); closeModal(); render(); toast(`Categoría “${esc(c.name)}” eliminada.`);
   };
 }

@@ -165,6 +165,28 @@ async function principal(){
     const trasBorrar = (await api(base+'/api/estado',{headers:H})).body;
     chk(!trasBorrar.exps.some(e=>e.id==='del-celular'), 'lo que se borra en la web no se resucita');
 
+    console.log('\n5b. Renombrar una categoría (no lo pisa un dispositivo viejo)');
+    const conRename = JSON.parse(JSON.stringify((await api(base+'/api/estado',{headers:H})).body));
+    const cat0 = conRename.cats[0];
+    const nombreViejo = cat0.name;
+    cat0.name = 'Casa'; cat0._upd = Date.now();               /* lo que hace el dashboard */
+    conRename._catEdits = Object.assign({}, conRename._catEdits);
+    conRename._catEdits[cat0.id] = { _upd:cat0._upd, _cat:JSON.parse(JSON.stringify(cat0)) };
+    await api(base+'/api/estado', {method:'PUT',headers:H,body:JSON.stringify(conRename)});
+    const trasRename = (await api(base+'/api/estado',{headers:H})).body;
+    chk(trasRename.cats[0].name === 'Casa', 'el renombre llega y queda guardado en el servidor (S1)');
+    /* Otro navegador que quedó con el estado anterior vuelve a subirlo tal cual */
+    const desactualizado = JSON.parse(JSON.stringify(trasRename));
+    delete desactualizado._catEdits;
+    desactualizado.cats[0].name = nombreViejo;
+    delete desactualizado.cats[0]._upd;
+    await api(base+'/api/estado', {method:'PUT',headers:H,body:JSON.stringify(desactualizado)});
+    const trasStale = (await api(base+'/api/estado',{headers:H})).body;
+    chk(trasStale.cats[0].name === 'Casa',
+        'un estado viejo NO revierte el renombre: gana la edición más reciente (S2)');
+    chk(trasStale._catEdits && trasStale._catEdits[cat0.id] && trasStale._catEdits[cat0.id]._cat.name === 'Casa',
+        'la edición sobrevive en el servidor para reaplicarse si se pierden los datos');
+
     console.log('\n6. Backup');
     const bk = await api(base+'/api/backup', {headers:H});
     chk(bk.status===200 && Array.isArray(bk.body.exps), 'GET /api/backup descarga el estado');

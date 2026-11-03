@@ -45,7 +45,11 @@ límites.
   medio de pago (**efectivo, débito, crédito, transferencia, Mercado Pago,
   código QR, cheque u otro**), comercio y observación.
 - **Categorías y subcategorías** con alta, modificación y baja, **límites por
-  categoría** con aviso al 80% y corte al 100%.
+  categoría** con aviso al 80% y corte al 100%. Cada cambio (renombrar, ícono,
+  color, límite, palabras clave, subcategorías) se guarda con fecha en
+  `_catEdits` y **sobrevive a un redeploy**: si el servidor pierde el disco y
+  vuelve a crear las categorías originales, la última edición se reaplica sola
+  y ningún dispositivo desactualizado la revierte al sincronizar.
 - **Pensada para el celular:** menú lateral, tablas que se acomodan, botones y
   campos grandes, sin el zoom automático de iOS y gráficos que se redibujan al
   rotar la pantalla. Se usa cómoda desde el teléfono.

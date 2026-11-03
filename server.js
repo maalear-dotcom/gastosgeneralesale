@@ -212,7 +212,14 @@ app.put('/api/estado', requiereAuth, (req,res)=>{
   const ids = new Set(entrante.exps.map(e=>e.id));
   const extras = (actual.exps||[]).filter(e => !ids.has(e.id) && !borrados.has(e.id));
   const corte = Date.now() - 14*864e5;
+  /* S2 · Las categorías y sus ediciones se fusionan por ID y gana siempre la
+     más reciente (_upd): un navegador desactualizado no pisa con un nombre
+     viejo el cambio hecho en otro dispositivo (ni al revés). */
+  const cats = motor.api.fusionarCats(entrante.cats, actual.cats||[]);
+  const catEdits = motor.api.fusionarEdits(entrante._catEdits, actual._catEdits);
   const salida = motor.api.normalizar(Object.assign({}, entrante, {
+    cats,
+    _catEdits: catEdits,
     exps: entrante.exps.concat(extras),
     _borrados: (entrante._borrados||[]).filter(b=>b.ts>corte),
     _rev: Math.max(entrante._rev||0, actual._rev||0) + 1,
