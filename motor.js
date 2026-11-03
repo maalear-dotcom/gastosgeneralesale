@@ -96,6 +96,7 @@ function crearMotor({ archivo } = {}){
     normalizar:  o => normalizar(o),
     registrarEdicion: c => registrarEdicion(c),
     registrarBorrado: id => registrarBorrado(id),
+    borrarSub: (c,id) => borrarSub(c,id),
     fusionarCats:  (a,b,alias) => fusionarCats(a,b,alias),
     fusionarEdits: (a,b) => fusionarEdits(a,b),
     aplicarEdits:  s => aplicarEdits(s),

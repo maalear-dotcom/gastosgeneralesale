@@ -114,7 +114,73 @@ const conEditViejo = m.api.normalizar({
 });
 chk(conEditViejo.cats.find(c => c.id === alq.id).name === 'Casa',
     'una edición más vieja no revierte el renombre más nuevo');
-chk(!conEditViejo._catEdits['cat-alquiler'], 'y la edición obsoleta se descarta');
+chk(conEditViejo._catEdits['cat-alquiler'] &&
+    conEditViejo._catEdits['cat-alquiler']._cat.name === 'Casa' &&
+    conEditViejo._catEdits['cat-alquiler']._upd === alq._upd,
+    'y la protección se actualiza con el valor vigente (para que un reseed no lo deshaga)');
+
+/* ---------- S1 + S2 para subcategorías (mismo criterio que las categorías) ---------- */
+const expensasSub = alq.subs.find(s => s.name === 'Expensas');
+const obraSub = { id: alq.id + '|obra', name:'Obra', kw:['obra','reforma'], ctx:null, _upd:Date.now() };
+alq.subs.push(obraSub);                                   /* agregada */
+m.api.registrarEdicion(alq);
+
+expensasSub.name = 'Expensas y consorcio';                 /* modificada */
+expensasSub.kw = ['expensa','expensas','consorcio'];
+expensasSub._upd = Date.now();
+m.api.registrarEdicion(alq);
+
+const pinturaSub = alq.subs.find(s => s.name === 'Pintura');
+m.api.borrarSub(alq, pinturaSub.id);                       /* borrada */
+m.api.registrarEdicion(alq);
+
+const reseed3 = m.api.defaults();
+reseed3._catEdits = copia(S._catEdits);
+const trasRedeploy3 = m.api.normalizar(reseed3);
+const casa = trasRedeploy3.cats.find(c => c.id === alq.id);
+chk(casa.subs.some(s => s.id === obraSub.id && s.name === 'Obra'),
+    'S1: la subcategoría agregada vuelve a aparecer tras un reseed');
+chk(casa.subs.some(s => s.id === expensasSub.id && s.name === 'Expensas y consorcio' && s.kw.includes('consorcio')),
+    'S1: la subcategoría modificada conserva su nombre y sus palabras clave');
+chk(!casa.subs.some(s => s.id === pinturaSub.id),
+    'S1: la subcategoría borrada no vuelve con el reseed');
+chk((casa._subsBorrados || {})[pinturaSub.id] > 0, 'el borrado queda registrado (_subsBorrados)');
+chk(JSON.stringify(m.api.normalizar(copia(trasRedeploy3))) === JSON.stringify(trasRedeploy3),
+    'volver a normalizar con subcategorías tampoco cambia nada (idempotente)');
+
+/* Un dispositivo agregó una subcategoría; el otro, sin saberlo, tocó la
+   categoría después: la subcategoría no se pierde y el campo sí se actualiza. */
+const ladoA = { id:'cat-x1', name:'Una', icon:'x', color:'#000000', limit:0, alert:true, kw:[],
+                subs:[{ id:'cat-x1|s1', name:'Agregada', kw:[], _upd:100 }], _upd:100 };
+const ladoB = JSON.parse(JSON.stringify(ladoA));
+ladoB.subs = []; ladoB.color = '#ffffff'; ladoB._upd = 200;
+const subConservada = m.api.fusionarCats([ladoA], [ladoB], new Map());
+chk(subConservada[0].subs.some(s => s.id === 'cat-x1|s1'),
+    'S2: la subcategoría agregada no se pierde si el otro toca la categoría después');
+chk(subConservada[0].color === '#ffffff', '...y los campos los toma la versión más reciente');
+
+/* La subcategoría borrada en un lado no revive al fusionar con el que la tiene */
+const conBorrado = { id:'cat-x2', name:'Dos', subs:[], _subsBorrados:{ 'cat-x2|s1':500 }, _upd:500 };
+const sinBorrado = { id:'cat-x2', name:'Dos', subs:[{ id:'cat-x2|s1', name:'Vieja', _upd:0 }], _upd:100 };
+const sinResucitar = m.api.fusionarCats([conBorrado], [sinBorrado], new Map());
+chk(!sinResucitar[0].subs.some(s => s.id === 'cat-x2|s1'),
+    'S2: la subcategoría borrada no vuelve al fusionar con otro dispositivo');
+
+/* De la misma subcategoría gana la versión más reciente, de cualquier lado */
+const v1 = { id:'cat-x3', name:'Tres', subs:[{ id:'cat-x3|s1', name:'Viejo', _upd:100 }], _upd:100 };
+const v2 = { id:'cat-x3', name:'Tres', subs:[{ id:'cat-x3|s1', name:'Nuevo', _upd:200 }], _upd:200 };
+chk(m.api.fusionarCats([v1], [v2], new Map())[0].subs[0].name === 'Nuevo' &&
+    m.api.fusionarCats([v2], [v1], new Map())[0].subs[0].name === 'Nuevo',
+    'S2: de la misma subcategoría gana la versión más reciente en los dos sentidos');
+
+/* Las ediciones guardadas (_catEdits) también mezclan las subcategorías */
+const edA = { _upd:100, _cat:{ id:'cat-x4', name:'Cua', color:'#000000', _upd:100,
+                               subs:[{ id:'cat-x4|s1', name:'Sub', _upd:100 }] } };
+const edB = { _upd:200, _cat:{ id:'cat-x4', name:'Cua', color:'#ffffff', _upd:200, subs:[] } };
+const edMixta = m.api.fusionarEdits({ 'cat-x4': edA }, { 'cat-x4': edB });
+chk(edMixta['cat-x4']._cat.subs.some(s => s.id === 'cat-x4|s1') &&
+    edMixta['cat-x4']._cat.color === '#ffffff' && edMixta['cat-x4']._upd === 200,
+    'S2: en _catEdits también se mezclan las subcategorías (protección de reseed)');
 
 fs.rmSync(dir, { recursive:true, force:true });
 console.log(fallos ? `\n${fallos} fallo(s)\n` : '\nRESULTADO: ok\n');

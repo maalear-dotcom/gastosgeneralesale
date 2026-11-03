@@ -50,6 +50,12 @@ límites.
   `_catEdits` y **sobrevive a un redeploy**: si el servidor pierde el disco y
   vuelve a crear las categorías originales, la última edición se reaplica sola
   y ningún dispositivo desactualizado la revierte al sincronizar.
+- **Las subcategorías funcionan igual que las categorías:** agregar, modificar o
+  eliminar una queda registrado con fecha (dentro de la copia de su categoría y
+  en `_catEdits`), por lo que también sobrevive a un redeploy. Al sincronizar,
+  las subcategorías se mezclan **una por una**: las que sólo existen en un
+  dispositivo se agregan, de la misma gana la versión más reciente y la que se
+  eliminó **no vuelve** (`_subsBorrados` guarda la fecha del borrado).
 - **Pensada para el celular:** menú lateral, tablas que se acomodan, botones y
   campos grandes, sin el zoom automático de iOS y gráficos que se redibujan al
   rotar la pantalla. Se usa cómoda desde el teléfono.

@@ -334,6 +334,25 @@ async function main(){
         'la edición se persiste junto con el resto del estado');
   }
 
+  console.log('\n10. Subcategorías: agregar desde la interfaz (S1)');
+  w.eval("go('categorias');");
+  await dormir(60);
+  w.eval("modalSub('" + supId + "', null)");
+  const inpSub = w.document.getElementById('sName');
+  chk(inpSub !== null, 'se abre el formulario de subcategoría');
+  if(inpSub){
+    inpSub.value = 'Almacén de prueba';
+    w.document.getElementById('sKw').value = 'prueba, muestra';
+    w.document.getElementById('sSave').click();
+    await dormir(60);
+    chk(w.eval("S.cats.find(c=>c.id==='" + supId + "').subs.some(s=>s.name==='Almacén de prueba')"),
+        'la subcategoría se agrega a la categoría');
+    chk(w.eval("S._catEdits['" + supId + "']._cat.subs.some(s=>s.name==='Almacén de prueba')"),
+        'queda guardada en _catEdits para sobrevivir a un deploy (S1)');
+    chk(w.eval("JSON.parse(localStorage.getItem('gastosGenerales.v1'))._catEdits['" + supId + "']._cat.subs.some(s=>s.name==='Almacén de prueba')"),
+        'se persiste en el navegador junto con el resto del estado');
+  }
+
   console.log(`\nRESULTADO: ${ok} ok, ${mal} fallos\n`);
   process.exit(mal ? 1 : 0);
 }
