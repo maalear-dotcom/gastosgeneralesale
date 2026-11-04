@@ -289,6 +289,13 @@ async function principal(){
         'el archivo se llama gastos-respaldo-AAAA-MM-DD-hhmm.json');
 
     const estadoActual = (await api(base+'/api/estado',{headers:H})).body;
+    /* Un gasto cargado DESPUÉS de ese respaldo: la restauración no debe perderlo */
+    const posterior = JSON.parse(JSON.stringify(estadoActual));
+    posterior.exps.push({ id:'posterior-al-respaldo', date:'2026-11-03', cat:posterior.cats[0].id, sub:null,
+      detail:'Cargado después del respaldo', amount:8888, pay:'', merchant:'', notes:'', src:'manual', _ts:Date.now() });
+    await api(base+'/api/estado', {method:'PUT',headers:H,body:JSON.stringify(posterior)});
+
+    /* El archivo de respaldo NO tiene ese gasto (es anterior) */
     const paraRestaurar = JSON.parse(JSON.stringify(estadoActual));
     paraRestaurar.exps.push({ id:'restaurado-tg', date:'2026-10-20', cat:paraRestaurar.cats[0].id, sub:null,
       detail:'Vuelta desde el respaldo', amount:7777, pay:'', merchant:'', notes:'', src:'texto', _ts:Date.now() });
@@ -299,6 +306,8 @@ async function principal(){
     await dormir(1500);
     s = (await api(base+'/api/estado',{headers:H})).body;
     chk(s.exps.some(e=>e.id==='restaurado-tg'), 'reenviar el .json al bot restaura el estado');
+    chk(s.exps.some(e=>e.id==='posterior-al-respaldo'),
+        'y NO pisa los gastos posteriores al respaldo (fusión, B1)');
     chk(mock.mensajes.some(m=>/Respaldo restaurado/.test(m.text||'')), 'el bot confirma la restauración en el chat');
     chk(Array.isArray(s.cats) && s.cats.length>=20, 'la restauración mantiene las categorías');
 

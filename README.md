@@ -49,7 +49,10 @@ límites.
   color, límite, palabras clave, subcategorías) se guarda con fecha en
   `_catEdits` y **sobrevive a un redeploy**: si el servidor pierde el disco y
   vuelve a crear las categorías originales, la última edición se reaplica sola
-  y ningún dispositivo desactualizado la revierte al sincronizar.
+  y ningún dispositivo desactualizado la revierte al sincronizar. Cada
+  categoría guarda además sus **nombres anteriores** (`_nombresPrevios`), así
+  que un gasto guardado con el nombre viejo vuelve a su categoría en vez de
+  quedar en *"Sin categoría"*.
 - **Las subcategorías funcionan igual que las categorías:** agregar, modificar o
   eliminar una queda registrado con fecha (dentro de la copia de su categoría y
   en `_catEdits`), por lo que también sobrevive a un redeploy. Al sincronizar,
@@ -112,6 +115,13 @@ todavía no hay servidor).
 > 2. **Reenviá al bot el último `gastos-respaldo-….json`** del chat — lo
 >    restaura al instante; o
 > 3. Usá *⬇︎ Descargar respaldo* / *⬆︎ Restaurar* del dashboard.
+>
+> Restaurar **fusiona**: el archivo sólo agrega lo que falta (gastos y
+> categorías) y **nunca pisa lo que ya tenés** — ni por Telegram, ni desde el
+> dashboard, ni por `/api/restore`. Los gastos posteriores al respaldo se
+> conservan, los que se borraron no vuelven, y si alguno quedó sin categoría
+> toma la que le corresponde según el archivo. Sólo si el servidor está
+> completamente vacío entra el archivo tal cual.
 >
 > Recomendado: agregá `TELEGRAM_CHAT_ID` (tu ID de chat, te lo muestra el bot
 > con `/start`) en Render → *Environment*, así el servidor puede avisarte por

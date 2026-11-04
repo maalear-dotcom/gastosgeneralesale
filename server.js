@@ -133,15 +133,23 @@ async function enviarArchivo(chatId, buf, opcs){
   return !!j.ok;
 }
 
-/* Restaura el estado desde un .json reenviado al bot (sólo para el chat vinculado) */
+/* Restaura el estado desde un .json reenviado al bot (sólo para el chat vinculado).
+   B1 · se FUSIONA con lo que hay: el respaldo sólo aporta lo que falta, nunca
+   pisa los gastos ni las categorías que ya están. */
 function restaurarEstado(b, chatId){
-  const s = motor.api.normalizar(Object.assign({}, b, {
-    _rev: (estado()._rev || 0) + 1,
-    bot: Object.assign({}, estado().bot || {}, b.bot || {}, { chatId, vinculado: (b.bot && b.bot.vinculado) || Date.now() })
-  }));
+  const actual = estado() || {};
+  const antes = (actual.exps||[]).length;
+  const respaldo = Object.assign({}, b, {
+    bot: Object.assign({}, actual.bot||{}, b.bot||{},
+                       { chatId, vinculado: (b.bot && b.bot.vinculado) || Date.now() })
+  });
+  const s = motor.api.normalizar(motor.api.fusionarEstado(actual, respaldo));
   motor.api.setEstado(s); motor.api.invalidarReglas(); motor.api.guardar(); motor.flush();
   _avisadoFaltaDatos = true;                    /* ya hay datos: no hace falta avisar */
-  console.log('· Restaurado desde Telegram: ' + s.exps.length + ' gastos, ' + s.cats.length + ' categorías');
+  const agregados = Math.max(0, s.exps.length - antes);
+  console.log('· Restaurado desde Telegram (fusión): +' + agregados + ' gasto(s), total ' +
+              s.exps.length + ' gastos, ' + s.cats.length + ' categorías');
+  return { total: s.exps.length, agregados, cats: s.cats.length };
 }
 
 /* Aviso único si el servidor quedó sin datos y hay un chat al que avisarle */
@@ -256,9 +264,11 @@ app.get('/api/comprobante/:id', requiereAuth, async (req,res)=>{
 app.post('/api/restore', requiereAuth, (req,res)=>{
   const b = req.body;
   if(!b || !Array.isArray(b.cats) || !Array.isArray(b.exps)) return res.status(400).json({error:'archivo_invalido'});
-  motor.api.setEstado(motor.api.normalizar(Object.assign({}, b, { _rev:(estado()._rev||0)+1 })));
-  motor.api.invalidarReglas(); motor.api.guardar(); motor.flush();
-  res.json({ ok:true, exps: estado().exps.length });
+  /* B1 · fusión: el archivo aporta lo que falta, no reemplaza lo que hay */
+  const antes = (estado().exps||[]).length;
+  const s = motor.api.normalizar(motor.api.fusionarEstado(estado()||{}, b));
+  motor.api.setEstado(s); motor.api.invalidarReglas(); motor.api.guardar(); motor.flush();
+  res.json({ ok:true, exps:s.exps.length, agregados: Math.max(0, s.exps.length - antes) });
 });
 
 /* ---- estado del bot ---- */
@@ -495,10 +505,11 @@ async function procesar(u){
         catch(e){ return enviar(chatId, '❌ Ese archivo no se pudo leer como JSON.'); }
         if(!b || !Array.isArray(b.cats) || !Array.isArray(b.exps))
           return enviar(chatId, '❌ Ese archivo no parece un respaldo de Gastos Generales.');
-        restaurarEstado(b, chatId);
-        const s = estado();
-        return enviar(chatId, `✅ <b>Respaldo restaurado</b>: ${s.exps.length} gasto${s.exps.length===1?'':'s'} y ${s.cats.length} categorías.\n\n` +
-          'Entrá al dashboard para verlo. Mandá /respaldo si querés una copia nueva.');
+        const r = restaurarEstado(b, chatId);
+        return enviar(chatId, `✅ <b>Respaldo restaurado</b>: ${r.total} gasto${r.total===1?'':'s'} y ${r.cats} categorías` +
+          (r.agregados ? `, de los cuales <b>${r.agregados}</b> se agregaron porque faltaban.` : '.') + '\n\n' +
+          'No se pisó lo que ya tenías: el archivo sólo aporta lo que falta. Entrá al dashboard para verlo. ' +
+          'Mandá /respaldo si querés una copia nueva.');
       }
       const esPdf = /pdf/i.test(d.mime_type || '') || /\.pdf$/i.test(d.file_name || '');
       const esImg = /^image\//.test(d.mime_type || '') || /\.(png|jpe?g|webp)$/i.test(d.file_name || '');

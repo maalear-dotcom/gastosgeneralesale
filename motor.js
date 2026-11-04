@@ -99,6 +99,7 @@ function crearMotor({ archivo } = {}){
     borrarSub: (c,id) => borrarSub(c,id),
     fusionarCats:  (a,b,alias) => fusionarCats(a,b,alias),
     fusionarEdits: (a,b) => fusionarEdits(a,b),
+    fusionarEstado:(a,b) => fusionarEstado(a,b),
     aplicarEdits:  s => aplicarEdits(s),
     analizarTexto:   (t, f) => analizarTexto(t, f),
     persistirDrafts: (d, doc) => persistirDrafts(d, doc),

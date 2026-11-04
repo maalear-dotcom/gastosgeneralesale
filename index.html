@@ -696,11 +696,42 @@ function normalizar(o){
    vuelve a ubicar si el ID desaparece. */
 function snapshotCat(c){ return JSON.parse(JSON.stringify(c)); }
 
+/* A2 · Nombres anteriores: cuando la categoría cambia de nombre se guardan los
+   que tuvo. Es con lo que se recupera un gasto guardado con el nombre viejo en
+   _catn: aunque la categoría hoy se llame distinto (o hasta tenga otro ID tras
+   un respaldo), el gasto vuelve a su lugar en vez de quedar en "Sin categoría". */
+function agregarNombrePrevio(c, nombre){
+  if(!c || !nombre) return;
+  const n = String(nombre);
+  if(norm(n) === norm(c.name)) return;
+  if(!Array.isArray(c._nombresPrevios)) c._nombresPrevios = [];
+  if(c._nombresPrevios.some(x=>norm(x)===norm(n))) return;
+  c._nombresPrevios.push(n);
+  if(c._nombresPrevios.length > 10) c._nombresPrevios = c._nombresPrevios.slice(-10);
+}
+
+/* Nombre que la categoría tenía en la semilla: es la línea de base para poder
+   registrar como histórico el nombre anterior cuando todavía no hay copia
+   previa en _catEdits (los seed son los únicos que existen sin edición). */
+let _semilla = null;
+function nombreDeSemilla(id){
+  if(!_semilla){
+    _semilla = {};
+    (defaults().cats||[]).forEach(c=>{ _semilla[c.id] = c.name; });
+  }
+  return _semilla[id];
+}
+
 function registrarEdicion(c){
   if(!c || !c.id || !S) return;
   c._upd = Date.now();
   if(!S._catEdits || typeof S._catEdits!=='object') S._catEdits = {};
   const previo = S._catEdits[c.id] && S._catEdits[c.id]._cat;
+  /* La primera vez que se edita una categoría todavía no hay copia previa: en
+     ese caso el nombre viejo es el de la semilla (los seed son los únicos que
+     existen sin _catEdits). */
+  if(previo && previo.name) agregarNombrePrevio(c, previo.name);
+  else agregarNombrePrevio(c, nombreDeSemilla(c.id));
   S._catEdits[c.id] = { _upd:c._upd, _cat:snapshotCat(c) };
   if(!previo || previo.name !== c.name){
     const nombre = c.name;
@@ -810,6 +841,17 @@ function fusionarVersionesCat(a, b){
   });
   if(finales.length || Array.isArray(out.subs)) out.subs = finales;
   if(Object.keys(borrados).length || out._subsBorrados) out._subsBorrados = borrados;
+  /* Nombres anteriores (A2): se unen los de las dos versiones —y también el
+     nombre que pierde la más vieja—, para que un gasto guardado con el nombre
+     viejo siga pudiendo encontrar la categoría aunque el lado más reciente no
+     lo traiga. */
+  const previos = [].concat(Array.isArray(otra._nombresPrevios) ? otra._nombresPrevios : [],
+                            Array.isArray(out._nombresPrevios) ? out._nombresPrevios : [],
+                            [otra.name]);
+  const unicos = [];
+  previos.forEach(n=>{ if(n && norm(n)!==norm(out.name) && !unicos.some(x=>norm(x)===norm(n))) unicos.push(n); });
+  if(unicos.length) out._nombresPrevios = unicos.slice(-10);
+  else delete out._nombresPrevios;
   return out;
 }
 /* Une dos listas de categorías por ID. Gana la edición más reciente (_upd); las
@@ -861,6 +903,76 @@ function fusionarEdits(a, b){
   return out;
 }
 
+/* B1 · Restauración por FUSIÓN: el respaldo sólo aporta lo que falta.
+   - Los gastos que ya están se conservan; sólo se agregan los del archivo.
+   - Si alguno quedó sin categoría (o en "Sin categoría"), recupera la que le
+     da el respaldo en vez de quedarse roto.
+   - Las categorías se mezclan por ID (gana la más reciente, como al
+     sincronizar) y lo que se borró en cualquiera de los dos lados no vuelve.
+   - Si el estado actual no tiene gastos —disco borrado o primer deploy—, los
+     del archivo entran tal cual (los borrados de este lado no los tapan).
+   Devuelve el estado listo para normalizar(). */
+function fusionarEstado(actual, respaldo){
+  const a = (actual && typeof actual==='object') ? actual : {};
+  const b = (respaldo && typeof respaldo==='object') ? respaldo : {};
+  const actExps = (Array.isArray(a.exps) ? a.exps : []).filter(Boolean);
+  const bkExps  = (Array.isArray(b.exps) ? b.exps : []).filter(Boolean);
+  const cfg = Object.assign({}, b.cfg||{}, a.cfg||{});
+  const bot = Object.assign({}, b.bot||{}, a.bot||{});
+  const rev = (a._rev||0) + 1;
+  const respaldoTs = Math.max(a._respaldoTs||0, b._respaldoTs||0) || undefined;
+
+  const alias = new Map();
+  const cats = fusionarCats(Array.isArray(a.cats)?a.cats:[], Array.isArray(b.cats)?b.cats:[], alias);
+  const _catEdits = fusionarEdits(b._catEdits, a._catEdits);
+  const porId = new Map(cats.map(c=>[c.id,c]));
+  const resuelve = id => alias.get(id) || id;
+  const catValida = id => { const c = porId.get(resuelve(id)); return !!c && norm(c.name)!=='sin categoria'; };
+  const acomodar = e => {
+    const n = Object.assign({}, e);
+    n.cat = resuelve(n.cat);
+    const c = porId.get(n.cat);
+    if(c){ n._catn = c.name; if(!(c.subs||[]).some(s=>s.id===n.sub)) n.sub = null; }
+    return n;
+  };
+
+  /* Gastos: se quedan con los actuales y agregan los del respaldo que falten,
+     respetando lo que se borró. Si el estado actual está vacío, los borrados de
+     acá no sirven para nada y no deben tapar la recuperación. */
+  const borrados = new Map();
+  if(actExps.length) (Array.isArray(a._borrados)?a._borrados:[])
+    .forEach(x=>{ if(x && x.id) borrados.set(x.id, Math.max(borrados.get(x.id)||0, x.ts||0)); });
+  (Array.isArray(b._borrados)?b._borrados:[])
+    .forEach(x=>{ if(x && x.id) borrados.set(x.id, Math.max(borrados.get(x.id)||0, x.ts||0)); });
+
+  const ids = new Set(actExps.map(e=>e.id));
+  const extras = bkExps.filter(e=>!ids.has(e.id) && !borrados.has(e.id)).map(acomodar);
+
+  /* Un gasto actual sin categoría (o en "Sin categoría") toma la del respaldo */
+  const bkPorId = new Map(bkExps.map(e=>[e.id, e]));
+  const exps = actExps.map(e=>{
+    if(catValida(e.cat)) return e;
+    const viejo = bkPorId.get(e.id);
+    if(!viejo || !catValida(viejo.cat)) return e;
+    /* Se conserva todo lo del gasto actual y sólo se le pega la categoría,
+       la subcategoría y el nombre que trae el respaldo. */
+    const n = Object.assign({}, e);
+    n.cat = resuelve(viejo.cat);
+    const c = porId.get(n.cat);
+    n.sub = (c && (c.subs||[]).some(s=>s.id===viejo.sub)) ? viejo.sub : null;
+    n._catn = c ? c.name : (viejo._catn || '');
+    return n;
+  });
+
+  return Object.assign({}, b, a, {
+    cfg, bot, cats, _catEdits,
+    exps: exps.concat(extras),
+    _borrados: Array.from(borrados, ([id,ts])=>({id, ts})).slice(-500),
+    _rev: rev,
+    _respaldoTs: respaldoTs
+  });
+}
+
 /* Los gastos cuya categoría ya no existe (IDs generados al azar en versiones
    anteriores, categorías borradas, fusión de estados de orígenes distintos) no
    desaparecen del tablero: primero se recuperan por el nombre guardado en _catn,
@@ -884,7 +996,8 @@ function repararCategorias(s){
       if(!e) continue;
       let det=null;
       if(e._catn){
-        const c=s.cats.find(x=>norm(x.name)===norm(e._catn));
+        const c=s.cats.find(x=>norm(x.name)===norm(e._catn)) ||
+                s.cats.find(x=>(x._nombresPrevios||[]).some(n=>norm(n)===norm(e._catn)));
         if(c) det={cat:c.id, sub:(c.subs.find(x=>x.id===e.sub)||{}).id||null};
       }
       if(!det){
@@ -2110,13 +2223,16 @@ function restaurarBackup(file){
     let j=null;
     try{ j=JSON.parse(rd.result); }catch(e){}
     if(!j || !Array.isArray(j.cats) || !Array.isArray(j.exps)) return toast('El archivo no parece un respaldo válido.','bad');
+    const faltan = j.exps.filter(e=>e && e.id && !S.exps.some(x=>x && x.id===e.id)).length;
     confirmar('Restaurar respaldo',
-      `Se reemplazarán tus <b>${S.exps.length}</b> gastos actuales por los <b>${j.exps.length}</b> del archivo <b>${esc(file.name)}</b>.`,
+      `El archivo <b>${esc(file.name)}</b> tiene <b>${j.exps.length}</b> gastos y <b>${faltan}</b> no están en la app. ` +
+      `Se agregan esos y se conservan tus <b>${S.exps.length}</b> actuales: <b>nada se pisa</b>.`,
       ()=>{
-        /* marca los actuales como borrados para que el servidor no los resucite */
-        S=normalizar(Object.assign({}, j, { _borrados:(j._borrados||[]).concat(S.exps.map(e=>({id:e.id, ts:Date.now()}))).slice(-500) }));
-        UI.mes=mesDe(hoyISO());
-        save(); render(); toast('Respaldo restaurado.','ok');
+        /* B1 · fusión, no reemplazo: antes se marcaban como borrados los gastos
+           actuales, así que un respaldo viejo los destruía para siempre. */
+        S = normalizar(fusionarEstado(S, j));
+        UI.mes = mesDe(hoyISO());
+        save(); render(); toast('Respaldo restaurado sin pisar lo que ya había.','ok');
       });
   };
   rd.readAsText(file);
@@ -2184,7 +2300,14 @@ function renderCategorias(){
       const antes=S.cats; const nuevas=seedCategorias(); const otros=nuevas.find(c=>norm(c.name)==='otros');
       /* Las categorías se emparejan primero por ID (así los gastos de una categoría
          renombrada, p. ej. "Casa", siguen en su lugar) y sólo después por nombre. */
-      const map={}; antes.forEach(c=>{ const misma=nuevas.find(n2=>n2.id===c.id)||nuevas.find(n2=>norm(n2.name)===norm(c.name)); map[c.id]=misma?misma.id:(otros?otros.id:null); });
+      const map={};
+      antes.forEach(c=>{
+        const misma=nuevas.find(n2=>n2.id===c.id)||nuevas.find(n2=>norm(n2.name)===norm(c.name));
+        /* A2: si la original estaba renombrada, ese nombre pasa a ser histórico
+           de la restaurada, así los gastos que lo traen en _catn no se pierden. */
+        if(misma && misma.name !== c.name) agregarNombrePrevio(misma, c.name);
+        map[c.id]=misma?misma.id:(otros?otros.id:null);
+      });
       /* La restauración queda registrada como edición vigente (S1): si no, un
          deploy posterior volvería a imponer los nombres propios que había. */
       const ts=Date.now();

@@ -32,6 +32,35 @@ chk(S._catEdits[alq.id]._upd === alq._upd && alq._upd > 0,
 chk(S.exps[0]._catn === 'Casa',
     'S3: el gasto pasa a guardar el nombre nuevo (_catn)');
 
+/* ---------- A2: nombres anteriores ---------- */
+chk(Array.isArray(alq._nombresPrevios) && alq._nombresPrevios.includes('Alquiler'),
+    'A2: al renombrar, el nombre anterior queda guardado (_nombresPrevios)');
+chk(S._catEdits[alq.id]._cat._nombresPrevios && S._catEdits[alq.id]._cat._nombresPrevios.includes('Alquiler'),
+    'A2: la copia de la edición lo conserva, así que sobrevive a un reseed');
+
+/* Un gasto con el nombre viejo y un ID que ya no existe (estado de un respaldo
+   anterior o de un dispositivo que quedó atrás) vuelve a su categoría por el
+   nombre histórico, en vez de quedar en "Sin categoría". */
+const conNombreViejo = m.api.normalizar({
+  cats: copia(S.cats),
+  exps: [ Object.assign({}, S.exps[0], { id:'g2', cat:'id-que-no-existe', _catn:'Alquiler' }) ],
+  _catEdits: copia(S._catEdits)
+});
+chk(conNombreViejo.exps[0].cat === alq.id,
+    'A2: un gasto con el nombre viejo en _catn encuentra la categoría renombrada');
+chk(!conNombreViejo.exps.some(e => e.cat === 'cat-sin-categoria'),
+    'A2: y por eso NO cae en "Sin categoría"');
+
+/* Al fusionar se conservan los nombres anteriores de las dos versiones */
+const ladoViejo = { id:'cat-x5', name:'Viejo nombre', _upd:100, _nombresPrevios:['Nombre original'], subs:[] };
+const ladoNuevo = { id:'cat-x5', name:'Nuevo nombre', _upd:200, subs:[] };
+const fusionNom = m.api.fusionarCats([ladoViejo], [ladoNuevo], new Map());
+chk((fusionNom[0]._nombresPrevios||[]).includes('Nombre original') &&
+    (fusionNom[0]._nombresPrevios||[]).includes('Viejo nombre'),
+    'A2: al fusionar quedan los nombres de las dos versiones');
+chk(!(fusionNom[0]._nombresPrevios||[]).includes('Nuevo nombre'),
+    'A2: y el nombre vigente no se guarda como histórico');
+
 /* El servidor pierde el disco y vuelve a crear la semilla con los 20 nombres
    originales, pero recibe el estado del navegador (que trae las ediciones). */
 const reseed = m.api.defaults();
