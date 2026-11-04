@@ -228,6 +228,31 @@ async function main(){
   chk(w.document.querySelector('#donut3d .dtop .dseg') !== null, 'la circunferencia se vuelve a dibujar con su interacción');
   w.eval("delete document.elementFromPoint; document.__segTactil = null;");
 
+  console.log('\n7f. Selector propio del gráfico y del detalle (mes a mes o todo)');
+  chk(w.eval("UI.mes") === '2026-10',
+      'al abrir con el mes en curso vacío, la vista arranca en el último mes con gastos');
+  const pickG = w.document.getElementById('pickGraf');
+  chk(pickG !== null, 'hay un selector para el gráfico y los detalles');
+  chk(pickG && pickG.value === '2026-10', 'y por defecto apunta al último mes con gastos, no al mes en curso');
+  const opsG = pickG ? Array.from(pickG.options).map(o=>o.value) : [];
+  chk(opsG.includes('2026-10') && opsG.includes('todo'), 'lista los meses con gastos y el "Todo (histórico)"');
+  chk(!opsG.includes('2026-11'), 'los meses sin gastos no se listan');
+
+  w.eval("UI.periodo='mes'; UI.mesGraf='todo'; go('dashboard');");
+  await dormir(60);
+  chk(/Total Histórico completo/.test(w.document.getElementById('view-dashboard').innerHTML),
+      'con "Todo" el pie de la tabla suma el total de todo');
+
+  w.eval("UI.mes='2026-11'; UI.mesGraf=null; go('dashboard');");
+  await dormir(60);
+  chk(w.eval("etiquetaGraf()") === 'Octubre 2026',
+      'aunque el período global quede en un mes vacío, el gráfico y el detalle siguen en el último con gastos');
+  chk(w.document.querySelectorAll('#view-dashboard .donut3d .dseg').length > 0, 'la torta sigue dibujada');
+  chk(w.document.getElementById('pickGraf').value === '2026-10', 'y el selector lo indica');
+
+  w.eval("UI.periodo='todo'; UI.mesGraf=null; UI.mes='2026-10'; go('dashboard');");
+  await dormir(60);
+
   console.log('\n8. Celular (responsive)');
   const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || ['',''])[1];
   chk(/@media \(max-width:860px\)/.test(css), 'existe la media query para celular');

@@ -34,8 +34,12 @@ límites.
 - **Dashboard:** KPI del período, detalle por categoría con límite y estado, y
   **gráfico de torta con el porcentaje y el importe de cada categoría** (dentro
   del gráfico, en la leyenda y al tocar cada porción), más el peso de cada
-  medio de pago y la evolución mensual. En la lista de gastos, **cada comprobante
-  muestra su importe y su % del total filtrado**.
+  medio de pago y la evolución mensual. El gráfico y el detalle tienen **su
+  propio selector: un mes concreto o el total de todo**; al abrir, si el mes en
+  curso no tiene gastos, la vista arranca en el último mes que sí los tiene (los
+  KPIs, las alertas y la evolución siguen el período global de arriba). En la
+  lista de gastos, **cada comprobante muestra su importe y su % del total
+  filtrado**.
 - **Gráficos con volumen:** la torta y las barras se dibujan en **3D** (cara
   superior, lateral y sombra), con **animación de entrada** al abrir cada
   vista y **iluminación al pasar el mouse**: el segmento se enciende, los demás
@@ -213,6 +217,7 @@ Sin `APP_PASSWORD` el dashboard queda **abierto**: nunca publiques así.
 | `server.js` | API con contraseña, webhook/polling de Telegram, OCR y PDF |
 | `test/run.js` | pruebas del servidor: API, fusión de datos, webhook, polling, alertas al celular |
 | `test/dashboard-remoto.js` | pruebas del dashboard en modo nube (usa `jsdom`) |
+| `test/escenario-huerfanos.js`, `test/categorias-editadas.js`, `test/restauracion-fusion.js` | gastos sin categoría, ediciones de categorías y restauración de respaldos |
 | `render.yaml`, `.env.example` | despliegue y configuración |
 
 **Sincronización:** el navegador manda su estado con un contador (`_rev`).
@@ -226,16 +231,20 @@ Cada 30 segundos (y al volver a la pestaña) la pantalla se refresca sola.
 npm test
 ```
 
-- **39** aserciones del servidor (motor, clasificación por comercio, contraseña,
+- **53** aserciones del servidor (motor, clasificación por comercio, contraseña,
   fusión de estados, webhook, polling, alertas al celular, medio de pago con
   código QR, PDF y foto con OCR, y el aprendizaje de palabras nuevas).
-- **71** aserciones del dashboard: modo nube, local y de contraseña, medio de
+- **7** de gastos que quedan sin categoría y vuelven solos, **34** de las
+  ediciones de categorías y subcategorías (sobreviven a un deploy y al
+  sincronizar, con sus nombres anteriores) y **19** de la restauración de
+  respaldos por fusión (no pisa lo que ya hay).
+- **135** aserciones del dashboard: modo nube, local y de contraseña, medio de
   pago con código QR, gráfico con % e importe, el volumen 3D de los gráficos,
-  las animaciones de entrada, la iluminación al pasar el mouse, y todo el
-  comportamiento en pantalla de celular (menú, columnas ocultas, gráfico
-  compacto, rotación).
+  las animaciones de entrada, la iluminación al pasar el mouse, el selector de
+  meses del gráfico y del detalle, y todo el comportamiento en pantalla de
+  celular (menú, columnas ocultas, gráfico compacto, rotación).
 
-Con las pruebas del navegador sin servidor quedan **201 aserciones** en verde.
+Con las pruebas del navegador sin servidor quedan **248 aserciones** en verde.
 
 ## 9. Limitaciones conocidas
 

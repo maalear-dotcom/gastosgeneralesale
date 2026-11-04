@@ -80,6 +80,8 @@ label.f{display:block;font-size:11.5px;font-weight:600;color:var(--ink-3);text-t
 .kpi .note{font-size:12px;color:var(--ink-3);margin-top:3px}
 .kpi .strip{position:absolute;left:0;top:0;bottom:0;width:3px}
 .grid-2{display:grid;grid-template-columns:1.15fr .85fr;gap:15px;margin-bottom:15px;align-items:start}
+.grafbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:11px}
+.grafbar .glab{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
 .grid-2b{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px;align-items:start}
 
 /* ---------- Table ---------- */
@@ -1468,6 +1470,7 @@ function normalizarOCR(texto){
    ========================================================= */
 const UI = {
   view:'dashboard', periodo:'mes', mes: mesDe(hoyISO()), modo:'ambos', open:{},
+  mesGraf:null,        /* selector propio de la torta y del detalle: null = último mes con gastos */
   gastoQ:'', gastoCat:'', gastoMedio:'', gastoDesde:'', gastoHasta:'',
   impTab:'texto', catOpen:{}, drafts:[], saltados:[], catQ:''
 };
@@ -1491,6 +1494,39 @@ function etiquetaPeriodo(){
   const [d,h]=rangoPeriodo(); return fechaCorta(d)+' – '+fechaCorta(h);
 }
 const gastosEn = (ini,fin)=> S.exps.filter(e=>e.date>=ini && e.date<=fin);
+
+/* ---------------------------------------------------------------
+   Selector propio del bloque "gráfico + detalle" de la vista general.
+   Muestra un mes concreto o el total de todo, sin tocar el período
+   global (que sigue mandando en los KPIs, las alertas y la evolución
+   mensual). Mientras el usuario no elija nada sigue al último mes con
+   gastos: así el dashboard nunca arranca con la torta vacía por estar
+   en el mes en curso. */
+function mesesConGastos(){
+  return [...new Set((S.exps||[]).map(e=>mesDe(e.date)).filter(Boolean))].sort();
+}
+function mesGraf(){
+  if(UI.mesGraf) return UI.mesGraf;
+  const m = mesesConGastos();
+  return m.length ? m[m.length-1] : mesDe(hoyISO());
+}
+function rangoGraf(){ const m=mesGraf(); return m==='todo' ? ['0000-01-01','9999-12-31'] : rangoMes(m); }
+function etiquetaGraf(){ const m=mesGraf(); return m==='todo' ? 'Histórico completo' : etiquetaMes(m); }
+function opcionesGraf(){
+  const meses = mesesConGastos().reverse();
+  const m = mesGraf();
+  if(m!=='todo' && !meses.includes(m)) meses.unshift(m);   /* un mes sin gastos elegido sigue a la vista */
+  return meses.map(v=>({v, t:etiquetaMes(v)})).concat([{v:'todo', t:'Todo (histórico)'}]);
+}
+/* Al abrir, si el mes en curso no tiene gastos, la vista arranca en el último
+   mes que sí los tiene: así nunca se despliega con todos los importes en cero. */
+function arrancarEnMesConGastos(){
+  if(UI.periodo !== 'mes') return;
+  const [i,f] = rangoMes(UI.mes);
+  if(gastosEn(i,f).length) return;
+  const m = mesesConGastos();
+  if(m.length) UI.mes = m[m.length-1];
+}
 
 function totales(ini,fin){
   const list=gastosEn(ini,fin);
@@ -1720,17 +1756,21 @@ function tactilDonut(){
    ========================================================= */
 function renderDashboard(){
   const [ini,fin]=rangoPeriodo();
-  const {list,total,porCat}=totales(ini,fin);
+  const {list,total,porCat}=totales(ini,fin);      /* período global: KPIs, alertas y subtítulo */
+  /* Gráfico y detalle: siguen el selector propio (un mes o "Todo") */
+  const rG = rangoGraf();
+  const det = totales(rG[0], rG[1]);
+  const dList = det.list, dTotal = det.total, gLab = etiquetaGraf();
   const hist = S.exps.reduce((a,e)=>a+e.amount,0);
   const alertas = generarAlertas(ini).filter(a=>a.lvl!=='ok');
   const conMov = Object.keys(porCat).length;
 
-  const items = Object.entries(porCat)
+  const items = Object.entries(det.porCat)
     .map(([cid,v])=>({label:catName(cid), value:v.total, color:catColor(cid), id:cid, n:v.n}))
     .sort((a,b)=>b.value-a.value);
 
   const pago = {};
-  list.forEach(e=>{ const k=e.pay||'No informado'; pago[k]=(pago[k]||0)+e.amount; });
+  dList.forEach(e=>{ const k=e.pay||'No informado'; pago[k]=(pago[k]||0)+e.amount; });
   const pagoArr = Object.entries(pago).sort((a,b)=>b[1]-a[1]);
 
   const mostrarMonto = UI.modo!=='pct';
@@ -1741,7 +1781,7 @@ function renderDashboard(){
     const c=catById(it.id)||{ id:it.id, name:'Sin categoría', icon:'🏷️', color:'#94a3b8', limit:0, alert:false, subs:[] };
     const e = estadoLimite(c, it.value);
     const open = !!UI.open[it.id];
-    const p = total? it.value/total*100 : 0;
+    const p = dTotal? it.value/dTotal*100 : 0;
     rows += `<tr>
       <td><div class="catcell"><button class="expander ${open?'open':''}" data-exp="${it.id}">▶</button><span class="catdot" style="background:${c.color}"></span>${esc(c.icon)}&nbsp;${esc(c.name)}</div>
         <div class="mini" style="margin-left:30px">${it.n} gasto${it.n>1?'s':''}${e.lim?' · límite '+money(e.lim):''}</div></td>
@@ -1754,7 +1794,7 @@ function renderDashboard(){
       /* El desplegado lista gasto por gasto agrupado por subcategoría.
          Los gastos sin subcategoría también aparecen ("Sin subcategoría"),
          así la suma del detalle siempre coincide con el contador "N gastos". */
-      const gastos = (porCat[it.id].list||[]).slice()
+      const gastos = (det.porCat[it.id].list||[]).slice()
         .sort((a,b)=> String(b.date).localeCompare(String(a.date)) || (b._ts||0)-(a._ts||0));
       const grupos=[]; const porKey={};
       gastos.forEach(g=>{
@@ -1765,21 +1805,21 @@ function renderDashboard(){
       const ordenSub = sid => { const i=c.subs.findIndex(s=>s.id===sid); return i<0? 999 : i; };
       grupos.sort((a,b)=> ordenSub(a.key)-ordenSub(b.key));
 
-      if(!grupos.length) rows += `<tr class="subrow"><td colspan="4" style="padding-left:52px;color:var(--ink-3)">Sin gastos en ${etiquetaPeriodo()}</td></tr>`;
+      if(!grupos.length) rows += `<tr class="subrow"><td colspan="4" style="padding-left:52px;color:var(--ink-3)">Sin gastos en ${gLab}</td></tr>`;
       grupos.forEach(gp=>{
         const nombre = gp.key? subName(it.id, gp.key) : 'Sin subcategoría';
         const sp = it.value? gp.total/it.value*100 : 0;
         rows += `<tr class="subrow">
           <td style="padding-left:56px">└ ${esc(nombre)} <span style="color:var(--ink-3)">· ${gp.n} gasto${gp.n>1?'s':''}</span></td>
           <td class="num">${mostrarMonto?money(gp.total):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?`<span style="color:var(--ink-3)">${pct(sp)}</span>`:''}</td>
-          <td class="num" style="color:var(--ink-3);font-size:12px">${pct(total? gp.total/total*100:0)} del total</td>
+          <td class="num" style="color:var(--ink-3);font-size:12px">${pct(dTotal? gp.total/dTotal*100:0)} del total</td>
           <td class="c-estado"></td></tr>`;
         gastos.filter(x=> (x.sub||'')===gp.key).forEach(g=>{
           const pg = it.value? g.amount/it.value*100 : 0;
           rows += `<tr class="subrow">
             <td style="padding-left:74px;color:var(--ink-3)">└ ${esc(g.detail||'Gasto')}${g.merchant? ' · 🏪 '+esc(g.merchant):''}${g.pay? ' · 💳 '+esc(g.pay):''}<div class="mini">${fechaCorta(g.date)}</div></td>
             <td class="num">${mostrarMonto?money(g.amount):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?`<span style="color:var(--ink-3)">${pct(pg)}</span>`:''}</td>
-            <td class="num" style="color:var(--ink-3);font-size:12px">${pct(total? g.amount/total*100:0)} del total</td>
+            <td class="num" style="color:var(--ink-3);font-size:12px">${pct(dTotal? g.amount/dTotal*100:0)} del total</td>
             <td class="c-estado"></td></tr>`;
         });
       });
@@ -1821,13 +1861,20 @@ function renderDashboard(){
       <div class="note">${alertas.length? 'Revisá las categorías con límite':'Sin límites superados'}</div></div>
   </div>
 
+  <div class="grafbar">
+    <span class="glab">Gráfico y detalle</span>
+    <select class="ctl" id="pickGraf">${opcionesGraf().map(o=>`<option value="${o.v}"${o.v===mesGraf()?' selected':''}>${o.t}</option>`).join('')}</select>
+    <span class="pill brand">${dList.length} gasto${dList.length===1?'':'s'} · ${money(dTotal)}</span>
+    <span class="pill" title="Los KPIs, las alertas y la evolución mensual siguen este otro período">KPIs y alertas: ${etiquetaPeriodo()}</span>
+  </div>
+
   <div class="grid-2">
     <div class="card"><div class="chead"><h3>Detalle por categoría</h3>
       <span class="pill brand">${mostrarMonto?'$':''}${mostrarMonto&&mostrarPct?' · ':''}${mostrarPct?'%':''}</span></div>
       <div class="cbody"><div class="tblwrap"><table class="tbl">
         <thead><tr><th style="width:44%">Categoría</th><th class="num" style="width:18%">Importe / %</th><th style="width:23%">Límite</th><th class="num c-estado">Estado</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4"><div class="empty"><div class="ei">🧾</div><b>Sin gastos en ${etiquetaPeriodo()}</b>Cargá un gasto o importá un mensaje de WhatsApp.</div></td></tr>`}</tbody>
-        ${total? `<tfoot><tr class="totalrow"><td>Total ${etiquetaPeriodo()}</td><td class="num">${mostrarMonto?money(total):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?'100%':''}</td><td colspan="2"></td></tr></tfoot>`:''}
+        <tbody>${rows || `<tr><td colspan="4"><div class="empty"><div class="ei">🧾</div><b>Sin gastos en ${gLab}</b>Cargá un gasto o importá un mensaje de WhatsApp.</div></td></tr>`}</tbody>
+        ${dTotal? `<tfoot><tr class="totalrow"><td>Total ${gLab}</td><td class="num">${mostrarMonto?money(dTotal):''}${mostrarMonto&&mostrarPct?'<br>':''}${mostrarPct?'100%':''}</td><td colspan="2"></td></tr></tfoot>`:''}
       </table></div></div>
     </div>
 
@@ -1842,10 +1889,10 @@ function renderDashboard(){
               <div class="dlayer" style="z-index:3;transform:translateY(6px);filter:brightness(.5)">${donutSVG(items,210,'prof')}</div>
               <div class="dlayer" style="z-index:2;transform:translateY(9px);filter:brightness(.36)">${donutSVG(items,210,'prof')}</div>
             </div>
-            <div class="center" id="dCenter" data-total="${money(total)}" data-lab="Total"><b>${money(total)}</b><span>Total</span></div>
+            <div class="center" id="dCenter" data-total="${money(dTotal)}" data-lab="Total"><b>${money(dTotal)}</b><span>Total</span></div>
           </div>
           <div class="legend">
-            ${items.length? items.map(i=>{const p=total? i.value/total*100:0; return `<div class="legrow" data-cat="${i.id}" title="${esc(i.label)}: ${money(i.value)} · ${pct(p)}">
+            ${items.length? items.map(i=>{const p=dTotal? i.value/dTotal*100:0; return `<div class="legrow" data-cat="${i.id}" title="${esc(i.label)}: ${money(i.value)} · ${pct(p)}">
               <span class="catdot" style="background:${i.color}"></span>
               <span class="nm">${esc(i.label)}</span>
               <span class="share"><i style="width:${Math.max(p,1.5)}%;background:${i.color}"></i></span>
@@ -1856,7 +1903,7 @@ function renderDashboard(){
         </div>
         ${pagoArr.length? `<div style="margin-top:14px;border-top:1px solid var(--line-2);padding-top:12px">
           <div style="font-size:11.5px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Por medio de pago</div>
-          ${pagoArr.map(([k,v])=>{const p=total?v/total*100:0; return `<div class="legrow" style="cursor:default" title="${esc(k)}: ${money(v)} · ${pct(p)}"><span class="nm">${esc(k)}</span>
+          ${pagoArr.map(([k,v])=>{const p=dTotal?v/dTotal*100:0; return `<div class="legrow" style="cursor:default" title="${esc(k)}: ${money(v)} · ${pct(p)}"><span class="nm">${esc(k)}</span>
             <span class="share"><i style="width:${Math.max(p,1.5)}%;background:var(--brand-2)"></i></span>
             <span class="pp">${pct(p)}</span><span class="vv">${money(v)}</span></div>`}).join('')}
         </div>`:''}
@@ -1875,6 +1922,8 @@ function renderDashboard(){
   $$('#segPeriodo button').forEach(b=>b.onclick=()=>{UI.periodo=b.dataset.p;render()});
   $$('#segModo button').forEach(b=>b.onclick=()=>{UI.modo=b.dataset.m;render()});
   $('#pickMes').onchange=e=>{UI.mes=e.target.value||UI.mes;render()};
+  const pickGraf=$('#pickGraf');
+  if(pickGraf) pickGraf.onchange=e=>{ UI.mesGraf=e.target.value; render(); };
   $$('[data-exp]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const id=b.dataset.exp;UI.open[id]=!UI.open[id];render()});
   $$('.legrow[data-cat]').forEach(b=>{
     b.onclick=()=>abrirDetalleCat(b.dataset.cat);
@@ -2812,6 +2861,7 @@ function initEventos(){
 document.addEventListener('DOMContentLoaded', async ()=>{
   const modo = await conectarServidor();   /* 'remoto' | 'login' | 'local' */
   if(modo!=='remoto') load();
+  arrancarEnMesConGastos();                /* si el mes en curso está vacío, abrir el último con gastos */
   initEventos();
   go('dashboard');
   if(modo==='login') mostrarLogin();
